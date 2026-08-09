@@ -9,6 +9,7 @@ import { LocaleService } from '@deepseek-ai/dsh-client-locale/client'
 import { apply, inject } from '../src/client/index.ts'
 import { SESSION_DRAG_TYPE } from '../src/client/PaneWorkspace.tsx'
 import type { PaneWorkspaceInjected } from '../src/client/PaneWorkspace.tsx'
+import type { PaneLayoutState, PaneLeaf, PaneSplit } from '../src/client/pane-layout-store.ts'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 
 afterEach(() => { cleanup() })
@@ -134,35 +135,27 @@ describe('ui-panes apply', () => {
     expect(dt4.setData).not.toHaveBeenCalled()
   })
 
-  it('splitWithNew splits and mints an INDEPENDENT fresh conversation per pane', async () => {
-    let minted = 0
-    const createSession = vi.fn(async (opts: { workspaceId: WorkspaceId }) => {
-      expect(opts.workspaceId).toBe('ws1' as WorkspaceId)
-      return `fresh-${minted++}` as SessionId
-    })
+  it('splitWithNew splits and leaves the new pane a NEW-CONVERSATION placeholder (no host session)', async () => {
+    const createSession = vi.fn(async () => 'unused' as SessionId)
     const b = await bench(true, createSession)
     await b.ctx.plugin({ inject: [...inject], apply }).await()
     const workspace = b.slots.entries('conversation.panes')
-    const store = (workspace[0]!.store as { create: () => { getSnapshot: () => { root: { id: string } } } }).create()
+    const store = (workspace[0]!.store as { create: () => { getSnapshot: () => PaneLayoutState } }).create()
     const rootId = store.getSnapshot().root.id
     const face = (workspace[0]!.inject as unknown as () => PaneWorkspaceInjected)()
-    // Each split mints its OWN session — never the shared New Session reuse
-    // — so typing in one pane never surfaces in another.
+    // A split is a pure VIEW operation: no host session is minted — the new
+    // pane is a placeholder whose stock hero starts the conversation (and
+    // only then creates its session). Nothing is shared until a pane starts.
     face.splitWithNew(rootId, 'horizontal', null, 'ws1' as WorkspaceId)
     await new Promise(r => setTimeout(r, 0))
-    const first = store.getSnapshot().root as unknown as { type: 'split'; first: { sessionId: string | null }; second: { id: string; sessionId: string | null } }
-    expect(createSession).toHaveBeenCalledTimes(1)
+    expect(createSession).not.toHaveBeenCalled()
+    const first = store.getSnapshot().root as PaneSplit
     expect(first.type).toBe('split')
-    expect(first.first.sessionId).toBeNull()
-    expect(first.second.sessionId).toBe('fresh-0')
-    // Splitting the freshly minted pane again mints ANOTHER independent
-    // session — the first pane keeps its own.
-    face.splitWithNew(first.second.id, 'vertical', null, 'ws1' as WorkspaceId)
+    expect((first.first as PaneLeaf).sessionId).toBeNull()
+    expect((first.second as PaneLeaf).sessionId).toBeNull()
+    // A second split adds another placeholder — still no host session.
+    face.splitWithNew((first.second as PaneLeaf).id, 'vertical', null, 'ws1' as WorkspaceId)
     await new Promise(r => setTimeout(r, 0))
-    expect(createSession).toHaveBeenCalledTimes(2)
-    // No workspace -> the new pane stays the plain hero (no create attempt).
-    face.splitWithNew(first.second.id, 'horizontal', null, undefined)
-    await new Promise(r => setTimeout(r, 0))
-    expect(createSession).toHaveBeenCalledTimes(2)
+    expect(createSession).not.toHaveBeenCalled()
   })
 })

@@ -32,7 +32,7 @@ export type SplitVerticalButtonProps =
  * @returns the split button element.
  */
 export function SplitVerticalButton({ useStore, useSessions, useWorkspaces, splitWithNew, t }: SplitVerticalButtonProps) {
-  const focusedPaneId = useStore(s => s.focusedPaneId)
+  const state = useStore(s => s)
   const current = useSessions((s: SessionListState) => s.current)
   const workspaceId = useWorkspaces((s: WorkspaceListState) => s.recentWorkspaceId)
   return (
@@ -42,11 +42,18 @@ export function SplitVerticalButton({ useStore, useSessions, useWorkspaces, spli
       aria-label={t('pane.split.vertical')}
       title={t('pane.split.vertical')}
       onClick={() => {
-        // The current session anchors the new pane's sibling: splitting the
-        // full-bleed pane keeps this session and opens a fresh conversation
-        // (no current session anchors null — hero-to-hero).
-        if (focusedPaneId !== null) {
-          splitWithNew(focusedPaneId, 'vertical', current ?? null, workspaceId)
+        // The anchor rule mirrors the keyboard/HeroHeader paths: splitting
+        // the SINGLE full-bleed pane keeps the current session (or stays
+        // fresh without one); splitting INSIDE the tree never anchors — a
+        // placeholder pane stays a placeholder, a session pane keeps its
+        // session. The split is a pure view operation.
+        if (state.focusedPaneId !== null) {
+          splitWithNew(
+            state.focusedPaneId,
+            'vertical',
+            state.root.type === 'leaf' ? (current ?? null) : null,
+            workspaceId,
+          )
         }
       }}
     >

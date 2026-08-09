@@ -37,4 +37,31 @@ describe('SplitPaneButton', () => {
     fireEvent.click(screen.getByRole('button', { name: en['pane.split'] }))
     expect(splitWithNew).toHaveBeenCalledWith(id, 'horizontal', 's1', 'ws1')
   })
+
+  it('splitting INSIDE the tree never anchors (placeholder stays a placeholder)', () => {
+    const instance = createPaneLayoutStore().create()
+    const splitWithNew = vi.fn()
+    // Split once first — the tree is now a split, so the button must pass
+    // anchor null (a session pane keeps its session; a placeholder stays a
+    // placeholder) instead of re-anchoring the current selection.
+    const rootId = instance.getSnapshot().root.id
+    instance.actions.splitPane(rootId, 'horizontal', 's1' as never)
+    render(
+      <SplitPaneButton
+        useStore={((sel: (s: unknown) => unknown) => sel(instance.getSnapshot())) as SplitPaneButtonProps['useStore']}
+        actions={instance.actions}
+        useSessions={((sel: (s: { current?: string }) => unknown) => sel({ current: 's1' })) as SplitPaneButtonProps['useSessions']}
+        useWorkspaces={((sel: (s: { recentWorkspaceId?: string }) => unknown) => sel({ recentWorkspaceId: 'ws1' })) as SplitPaneButtonProps['useWorkspaces']}
+        useSessionById={neverHook}
+        useProjectionById={neverHook}
+        SessionScope={neverHook}
+        splitWithNew={splitWithNew}
+        renderConversation={(() => null)}
+        t={t}
+      />,
+    )
+    const id = instance.getSnapshot().focusedPaneId
+    fireEvent.click(screen.getByRole('button', { name: en['pane.split'] }))
+    expect(splitWithNew).toHaveBeenCalledWith(id, 'horizontal', null, 'ws1')
+  })
 })

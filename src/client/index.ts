@@ -1,5 +1,5 @@
 /** Registers the pane workspace and the header split/close affordances. */
-import type { ClientContext, EngineStoreHandle, SessionId, SessionListState, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext, EngineStoreHandle, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { PaneWorkspace, SESSION_DRAG_TYPE, type PaneWorkspaceInjected } from './PaneWorkspace.tsx'
@@ -29,17 +29,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Dictionary namespace owned by this plugin (pane chrome copy). */
 const NS = 'panes'
-
-/**
- * The runtime sessions-create shape. Every DSH's SessionsService exposes
- * `create({ workspaceId })` (it backs the New Session reuse internally)
- * even where the feature-facing ISessions contract has not widened to
- * include it — this plugin bridges through the runtime method rather than
- * requiring a core contract edit.
- */
-interface SessionsCreateBridge {
-  create(opts: { workspaceId: WorkspaceId }): Promise<SessionId>
-}
 
 /** Services required by the panes plugin. */
 export const inject = ['slots', 'locale', 'sessions']
@@ -71,27 +60,15 @@ export function apply(ctx: ClientContext): void {
     ({ create: () => paneStore }) as unknown as EngineStoreHandle<PaneLayoutState, PaneActions>
 
   /**
-   * Split + seed the new pane as an INDEPENDENT fresh conversation in the
-   * workspace. The split mints a NEW blank session on the host per pane
-   * (sessions.create always creates — never the New Session reuse of
-   * connectWorkspace): a stack of new-conversation panes must stay isolated,
-   * so typing in one must not surface in the others. Without a workspace the
-   * new pane stays the plain add-a-workspace hero.
+   * Split, leaving the new pane as a NEW-CONVERSATION PLACEHOLDER (no host
+   * session — the split is a pure view operation). The placeholder renders
+   * the stock hero (workspace picker): choosing a workspace there starts the
+   * conversation, which creates the session and binds it to that pane. A
+   * stack of placeholders stays independent by construction — nothing is
+   * shared until each pane actually starts its own conversation.
    */
-  const splitWithNew: PaneWorkspaceInjected['splitWithNew'] = (paneId, direction, anchor, workspaceId) => {
+  const splitWithNew: PaneWorkspaceInjected['splitWithNew'] = (paneId, direction, anchor) => {
     paneStore.actions.splitPane(paneId, direction, anchor)
-    // The split focuses the NEW pane; bind it to a fresh blank conversation.
-    const newPaneId = paneStore.getSnapshot().focusedPaneId
-    if (workspaceId !== undefined && newPaneId !== null) {
-      // Runtime bridge: every DSH's SessionsService exposes create() (it
-      // backs the New Session reuse), even where the feature-facing contract
-      // has not widened to include it — cast to the runtime shape instead of
-      // requiring a core edit.
-      void (ctx.sessions as unknown as SessionsCreateBridge).create({ workspaceId }).then(
-        (sessionId) => { paneStore.actions.setPaneSession(newPaneId, sessionId) },
-        () => { /* create failures leave the pane as the plain hero */ },
-      )
-    }
   }
 
   ctx.effect(() => { return ctx.locale.register(NS, { zh, en }) }, 'ui-panes: dictionaries')
