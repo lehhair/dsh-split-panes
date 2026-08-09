@@ -44,6 +44,7 @@
 
 :global([data-phase] > header:not([aria-hidden='true']) > div:first-child nav) {
   grid-column: 1;
+  grid-row: 1;
   min-width: 0;
 }
 
@@ -51,6 +52,7 @@
    padding, underline — are for the standalone row; neutralize them here). */
 :global([data-phase] > header:not([aria-hidden='true']) > div:nth-child(2)) {
   grid-column: 2;
+  grid-row: 1;
   margin: 0;
   padding: 0;
   justify-content: flex-end;
@@ -71,6 +73,7 @@
    As a real column it can never overlap the tabs, whatever its width. */
 :global([data-phase] > header:not([aria-hidden='true']) > div:first-child > div:last-child) {
   grid-column: 3;
+  grid-row: 1;
   display: flex;
   align-items: center;
   gap: 2px;
