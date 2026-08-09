@@ -6,42 +6,51 @@
  * sidebar-fused color field are plugin concerns, not core edits.
  *
  * Single-row header: the stock header is `titleRow (crumbs + actions)`
- * followed by a second `tabs` row; turning the header into a two-column grid
- * puts the tabs on the SAME line (crumbs left, tabs right), removes the
- * hairline, and replaces it with the PiUI gradient. The actions row is
- * lifted out of the title row and pinned to the header's FAR RIGHT (past
- * the tabs), and the header's baseline aligns with the sidebar's top chrome
- * (both rows center on y=28 at 44px scale). The selectors walk the
- * conversation root's stable `data-phase` attribute, so no hashed class
- * names leak across packages.
+ * followed by a second `tabs` row. `display: contents` on the title row
+ * lifts its children (the crumbs nav and the actions container) straight
+ * into the header's grid, making it a true THREE-column grid —
+ * `crumbs | tabs | actions` — so the actions sit on the far right past the
+ * tabs WITHOUT overlapping them, no matter how wide the actions row is (the
+ * subagent catalog badge, split H/V, close). The header's baseline aligns
+ * with the sidebar's top chrome (all rows center on y=28 at 44px scale).
+ * The selectors walk the conversation root's stable `data-phase` attribute,
+ * so no hashed class names leak across packages.
  *
  * The header's top padding is a variable (--pane-pad-top): split panes sit
  * inside the frame's 8px padding + 1px border, so the pane's own stylesheet
  * overrides the variable to keep the header baseline aligned with the
- * sidebar; the absolute actions row recenters through the same variable.
+ * sidebar; the actions column recenters through the same variable.
  */
 :global([data-phase] > header:not([aria-hidden='true'])) {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 16px;
-  /* The right padding clears the pinned actions row (3 buttons ≈ 92px +
-     margin): the tabs column ends before the actions ever overlap it. The
-     top padding is a variable (--pane-pad-top, 12px by default) so split
+  /* The top padding is a variable (--pane-pad-top, 12px by default) so split
      panes can override it to keep the baseline aligned with the sidebar. */
-  padding: var(--pane-pad-top, 12px) 160px 0 20px;
+  padding: var(--pane-pad-top, 12px) 20px 0 20px;
   border-bottom: none;
   position: relative;
   z-index: 5;
 }
 
+/* The title row dissolves into the grid: its children (crumbs nav, actions
+   container) become grid items — their DOM order (crumbs, actions) precedes
+   the tabs, so explicit grid-column pins them to the intended columns:
+   crumbs | tabs | actions. */
 :global([data-phase] > header:not([aria-hidden='true']) > div:first-child) {
+  display: contents;
+}
+
+:global([data-phase] > header:not([aria-hidden='true']) > div:first-child nav) {
+  grid-column: 1;
   min-width: 0;
 }
 
-/* The tabs row becomes the grid's right column (its own strip styles —
+/* The tabs row becomes the grid's middle column (its own strip styles —
    padding, underline — are for the standalone row; neutralize them here). */
 :global([data-phase] > header:not([aria-hidden='true']) > div:nth-child(2)) {
+  grid-column: 2;
   margin: 0;
   padding: 0;
   justify-content: flex-end;
@@ -57,15 +66,14 @@
   padding: 0 0 4px;
 }
 
-/* The header actions row (split H/V + close buttons) pins to the header's
-   far right — past the tabs — so the row reads crumbs | tabs | actions. The
-   recenter offset is half the header's top padding: the content row's
-   center sits pad/2 below the header's geometric center. */
+/* The header actions row (subagent badge, split H/V, close) is the grid's
+   third column — past the tabs, so the row reads crumbs | tabs | actions.
+   As a real column it can never overlap the tabs, whatever its width. */
 :global([data-phase] > header:not([aria-hidden='true']) > div:first-child > div:last-child) {
-  position: absolute;
-  right: 28px;
-  top: calc(50% + calc(var(--pane-pad-top, 12px) / 2));
-  transform: translateY(-50%);
+  grid-column: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 /* PiUI gradient replacing the hairline (covers the scrollport's top edge). */
