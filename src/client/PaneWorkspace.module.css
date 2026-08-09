@@ -1,0 +1,128 @@
+/* Pane workspace: split panes are the STOCK conversation column inside a
+   focus-grabbing frame. Horizontal neighbours touch through the divider's
+   own 6px grid track; the frame padding (8px) owns the outer margins, and
+   the inter-pane gap is the divider's 6px in BOTH directions (user ruling:
+   pane-to-pane spacing must match everywhere). The frame border marks
+   focus: quiet edge unfocused, DeepSeek brand blue when focused. */
+.host {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px;
+}
+
+/* The single full-bleed surface: transparent wrapper carrying the session
+   drag & drop (the FIRST split) — visually identical to the plain stock
+   conversation, no border, no padding. --drop-pad tells the drop-zone
+   overlay to inset from the outer edges by the split tree's host padding
+   (8px), so the highlight lands where the pane border appears after the
+   split. */
+.singleSurface {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  --drop-pad: 8px;
+}
+
+/* One pane: the full stock conversation (its own header included) with a
+   focus border. The border (not outline) stays visible under the sticky
+   composer: content lives inside the border box, so the composer can never
+   cover the pane's edge. position: relative anchors the drop-zone overlay. */
+.pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-base);
+  border: 1px solid var(--dsw-alias-border-l2);
+}
+
+.pane > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane[data-focused] {
+  border-color: var(--dsw-static-deepseek-500);
+}
+
+/* New-conversation pane title bar: the hero has no stock header, so the pane
+   shows a minimal bar aligned with the session panes' header baseline. In
+   the SINGLE full-bleed state it sits at the column top (12px default pad,
+   same as the native header); inside split panes the frame's padding + border
+   shift everything down, so the pane overrides --pane-pad-top to keep the
+   content row on the same y=28 baseline. */
+.heroHeader {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 32px;
+  padding: var(--pane-pad-top, 12px) 20px 0;
+}
+
+.heroTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.heroActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+/* The pane's header chrome must line up with the side-bar's top chrome:
+   the frame's 8px padding + 1px border shift everything down, so the pane
+   overrides the top-padding variable (12px -> 3px) — the stock header AND
+   the hero title bar both inherit it, keeping their content rows centered
+   on the same y=28 baseline as the single pane. */
+.pane {
+  --pane-pad-top: 3px;
+}
+
+/* Header split affordance (the stock conversation header's actions row,
+   and the hero header's action row). */
+.splitButton,
+.closeButton,
+.heroButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.splitButton:hover,
+.splitButton:focus-visible,
+.closeButton:hover,
+.closeButton:focus-visible,
+.heroButton:hover,
+.heroButton:focus-visible {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}

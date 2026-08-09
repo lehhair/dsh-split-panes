@@ -1,0 +1,97 @@
+/**
+ * PiUI-style global chrome, owned by THIS plugin and injected with it
+ * (tsdown emits the css into the plugin's `<style data-plugin>` tag, which
+ * the loader removes on unload). Without ui-panes in the bundle the GUI is
+ * byte-for-byte stock — the single-row conversation header and the
+ * sidebar-fused color field are plugin concerns, not core edits.
+ *
+ * Single-row header: the stock header is `titleRow (crumbs + actions)`
+ * followed by a second `tabs` row; turning the header into a two-column grid
+ * puts the tabs on the SAME line (crumbs left, tabs right), removes the
+ * hairline, and replaces it with the PiUI gradient. The actions row is
+ * lifted out of the title row and pinned to the header's FAR RIGHT (past
+ * the tabs), and the header's baseline aligns with the sidebar's top chrome
+ * (both rows center on y=28 at 44px scale). The selectors walk the
+ * conversation root's stable `data-phase` attribute, so no hashed class
+ * names leak across packages.
+ *
+ * The header's top padding is a variable (--pane-pad-top): split panes sit
+ * inside the frame's 8px padding + 1px border, so the pane's own stylesheet
+ * overrides the variable to keep the header baseline aligned with the
+ * sidebar; the absolute actions row recenters through the same variable.
+ */
+:global([data-phase] > header:not([aria-hidden='true'])) {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 16px;
+  /* The right padding clears the pinned actions row (3 buttons ≈ 92px +
+     margin): the tabs column ends before the actions ever overlap it. The
+     top padding is a variable (--pane-pad-top, 12px by default) so split
+     panes can override it to keep the baseline aligned with the sidebar. */
+  padding: var(--pane-pad-top, 12px) 160px 0 20px;
+  border-bottom: none;
+  position: relative;
+  z-index: 5;
+}
+
+:global([data-phase] > header:not([aria-hidden='true']) > div:first-child) {
+  min-width: 0;
+}
+
+/* The tabs row becomes the grid's right column (its own strip styles —
+   padding, underline — are for the standalone row; neutralize them here). */
+:global([data-phase] > header:not([aria-hidden='true']) > div:nth-child(2)) {
+  margin: 0;
+  padding: 0;
+  justify-content: flex-end;
+}
+
+/* Tab labels center on the same line as the title text: the stock tab keeps
+   11px of underline padding below its 16px line box, which lifts the label
+   ~5px above the title's center; flex-centering the label and shrinking the
+   underline gap re-centers it (the 3px active bar still sits below). */
+:global([data-phase] > header:not([aria-hidden='true']) > div:nth-child(2) button) {
+  display: flex;
+  align-items: center;
+  padding: 0 0 4px;
+}
+
+/* The header actions row (split H/V + close buttons) pins to the header's
+   far right — past the tabs — so the row reads crumbs | tabs | actions. The
+   recenter offset is half the header's top padding: the content row's
+   center sits pad/2 below the header's geometric center. */
+:global([data-phase] > header:not([aria-hidden='true']) > div:first-child > div:last-child) {
+  position: absolute;
+  right: 28px;
+  top: calc(50% + calc(var(--pane-pad-top, 12px) / 2));
+  transform: translateY(-50%);
+}
+
+/* PiUI gradient replacing the hairline (covers the scrollport's top edge). */
+:global([data-phase] > header:not([aria-hidden='true']))::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 32px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, var(--dsw-alias-bg-base), transparent);
+}
+
+/* Content breathing room: the conversation scrollport starts a small step
+   below the header so the first message never hugs the gradient band. */
+:global([data-phase] > [data-conversation-scroll]) {
+  padding-top: 12px;
+}
+
+/* Sidebar fused with the conversation surface (user ruling: one continuous
+   color field, PiUI-style) — a theme-token override owned by this plugin. */
+:global(:root) {
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-00);
+}
+
+:global(body[data-ds-dark-theme]) {
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-950);
+}

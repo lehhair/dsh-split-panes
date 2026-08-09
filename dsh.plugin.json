@@ -1,0 +1,15 @@
+{
+  "id": "@dsh-external/dsh-split-panes",
+  "version": "0.1.0",
+  "main": "./lib/index.js",
+  "client": {
+    "main": "./lib/client.js",
+    "inject": [
+      "@deepseek-ai/dsh-client-runtime",
+      "@deepseek-ai/dsh-client-ui-layout"
+    ]
+  },
+  "engines": {
+    "dsh": ">=0.0.1"
+  }
+}

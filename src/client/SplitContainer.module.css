@@ -1,0 +1,50 @@
+/* Split-pane host: one full-bleed surface (the sidebar-fused conversation
+   color field continues through every pane). */
+.host {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* One split level: a 3-track grid (side | divider | side). The grid template
+   is owned inline by SplitView so a drag can rewrite it without store
+   traffic; this sheet only shapes the tracks' min constraints. */
+.split {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.paneSide {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.paneSide > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The divider is an independent grid item whose own width/height + negative
+   margins widen its hit area over the visual 6px gap (PiUI model). */
+.divider {
+  position: relative;
+  z-index: 1;
+  touch-action: none;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.split[data-direction='vertical'] .divider {
+  cursor: row-resize;
+}
+
+.divider:hover,
+.divider:focus-visible {
+  background: var(--dsw-alias-interactive-bg-hover);
+  outline: none;
+}

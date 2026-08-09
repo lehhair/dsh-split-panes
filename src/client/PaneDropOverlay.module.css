@@ -1,0 +1,80 @@
+/* Drop-zone highlight for session drag & drop: a pointer-transparent layer
+   over the pane with the active zone drawn in DeepSeek brand blue (the same
+   accent as the focused pane border). The edge highlights sit where the NEW
+   pane's border will actually land after the split: they leave the divider's
+   half-gap (SPLIT_GAP/2 = 3px) toward the pane center, inset from the outer
+   edges by --drop-pad (the split tree's host padding — 8px on the single
+   full-bleed surface, 0 inside a pane whose overlay already lives inside the
+   padding), and use the pane's own 1px border + 10px radius — the visual
+   promise matches the result. Center = replace the pane's session (no split,
+   so it keeps the larger 20% margin hit hint). */
+.layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+
+/* Shared pane-border look: 1px brand-blue border, 10px radius, tinted fill. */
+.center,
+.left,
+.right,
+.top,
+.bottom {
+  position: absolute;
+  border-radius: 10px;
+  border: 1px solid var(--dsw-static-deepseek-500);
+  background: color-mix(in srgb, var(--dsw-static-deepseek-500) 12%, transparent);
+}
+
+/* Center rectangle: 20% margins / 60% x 60% (the hit test is a slightly
+   tighter 40% x 40% inner box, PiUI parity). */
+.center {
+  left: 20%;
+  right: 20%;
+  top: 20%;
+  bottom: 20%;
+}
+
+/* Edge halves: pinned by both edges (never width — box-sizing-proof), inset
+   by the divider's half-gap (3px = SPLIT_GAP/2) from the pane center and by
+   the host padding (--drop-pad) from the outer edges, so the highlight lands
+   exactly where the new pane's border appears — the divider track (6px)
+   stays between it and the original, and the frame padding stays outside. */
+.left {
+  left: var(--drop-pad, 0px);
+  right: calc(50% + 3px);
+  top: var(--drop-pad, 0px);
+  bottom: var(--drop-pad, 0px);
+}
+
+.right {
+  left: calc(50% + 3px);
+  right: var(--drop-pad, 0px);
+  top: var(--drop-pad, 0px);
+  bottom: var(--drop-pad, 0px);
+}
+
+.top {
+  left: var(--drop-pad, 0px);
+  right: var(--drop-pad, 0px);
+  top: var(--drop-pad, 0px);
+  bottom: calc(50% + 3px);
+}
+
+.bottom {
+  left: var(--drop-pad, 0px);
+  right: var(--drop-pad, 0px);
+  top: calc(50% + 3px);
+  bottom: var(--drop-pad, 0px);
+}
+
+/* Morph between zones instead of hard-swapping (PiUI parity). */
+.center,
+.left,
+.right,
+.top,
+.bottom {
+  transition: left 150ms ease-out, right 150ms ease-out,
+    top 150ms ease-out, bottom 150ms ease-out;
+}
