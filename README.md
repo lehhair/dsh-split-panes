@@ -9,6 +9,10 @@ DSH 对话分屏插件（PiUI 风格）：把信息流分成多个可独立操�
 - **侧边栏拖拽分配**：把侧边栏会话拖到窗格上——中心落下替换该窗格会话，四条边缘落下向该侧分屏（被拖会话进新窗格，焦点跟随）；拖拽通道完全插件化（capture dragstart 反查）
 - **原生视觉**：未分屏时逐字节等同原生（无边框、无 chrome）；分屏后窗格带焦点蓝边框（选中 `deepseek-500` / 未选中灰）；header 单行化 + PiUI 渐变 + 内容留白
 
+## 效果预览
+
+![dsh-split-panes 分屏效果](screenshots/split-panes.png)
+
 ## 前置：渲染器会话绑定能力
 
 分屏的核心依赖渲染器能**按 id 绑定会话**（`SessionScope` 全局座位）。这是官方渲染器尚未提供的能力（已提交提案：[dsh-external/issues#486](https://github.com/dsh-external/issues/issues/486)），需要先让运行环境具备它：
