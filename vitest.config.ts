@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config'
     types, and the linked packages' `./client` exports point at browser
     bundles (lib/client.js, loader-bannered) — tests must resolve to the
     fork's src instead, like the monorepo's tsconfig paths. */
-const fork = fileURLToPath(new URL('../test-lehhair/packages/client', import.meta.url))
+const fork = fileURLToPath(new URL('../dsh2026/test-lehhair/packages/client', import.meta.url))
 
 export default defineConfig({
   test: {
@@ -21,8 +21,9 @@ export default defineConfig({
       '@deepseek-ai/dsh-client-ui-layout/client': `${fork}/ui-layout/src/client/index.ts`,
       '@deepseek-ai/dsh-client-ui-primitives': `${fork}/ui-primitives/src/index.ts`,
       '@deepseek-ai/dsh-client-locale/client': `${fork}/locale/src/client/index.ts`,
-      '@deepseek-ai/dsh-client-test-runtime': `${fork}/test-runtime/src/index.ts`,
-      '@deepseek-ai/dsh-client-test-runtime/client': `${fork}/test-runtime/src/client/index.ts`,
+      '@deepseek-ai/dsh-client-test-runtime': `${fork}/../test-support/client-runtime/src/index.ts`,
+      '@deepseek-ai/dsh-client-test-runtime/client': `${fork}/../test-support/client-runtime/src/client/index.ts`,
     },
   },
 })
+

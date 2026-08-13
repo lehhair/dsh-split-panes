@@ -4,8 +4,8 @@
 import { Context } from 'cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent } from '@testing-library/react'
-import { SlotsService } from '@deepseek-ai/dsh-client-runtime/client'
-import { LocaleService } from '@deepseek-ai/dsh-client-locale/client'
+import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
+import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply, inject } from '../src/client/index.ts'
 import { SESSION_DRAG_TYPE } from '../src/client/PaneWorkspace.tsx'
 import type { PaneWorkspaceInjected } from '../src/client/PaneWorkspace.tsx'
@@ -16,8 +16,8 @@ afterEach(() => { cleanup() })
 
 async function bench(declare = true, createSession?: (opts: { workspaceId: WorkspaceId }) => Promise<SessionId>) {
   const ctx = new Context()
-  await ctx.plugin(SlotsService).await()
-  ctx.provide('locale', new LocaleService(ctx))
+  await ctx.plugin(SlotRegistry).await()
+  ctx.provide('locale', new LocaleRuntime(ctx))
   // splitWithNew mints fresh sessions through sessions.create — each call
   // returns a NEW id so a stack of split panes stays independent.
   let next = 0
@@ -33,7 +33,7 @@ async function bench(declare = true, createSession?: (opts: { workspaceId: Works
     },
     create: createSession ?? vi.fn(async () => `blank-${++next}` as SessionId),
   })
-  const slots = ctx.get('slots') as SlotsService
+  const slots = ctx.get('slots') as SlotRegistry
   if (declare) {
     slots.register(
       {

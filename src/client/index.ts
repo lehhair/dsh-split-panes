@@ -2,6 +2,9 @@
 import type { ClientContext, EngineStoreHandle, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+// Type-only: pulls this package's GlobalStandardProps merge (SessionScope +
+// by-id seats) into every compilation unit that touches the panes surfaces.
+import type {} from './global-seats.ts'
 import { PaneWorkspace, SESSION_DRAG_TYPE, type PaneWorkspaceInjected } from './PaneWorkspace.tsx'
 import { SplitPaneButton } from './SplitPaneButton.tsx'
 import { SplitVerticalButton } from './SplitVerticalButton.tsx'

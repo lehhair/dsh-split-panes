@@ -15,13 +15,9 @@ DSH 对话分屏插件（PiUI 风格）：把信息流分成多个可独立操�
 
 ## 前置：渲染器会话绑定能力
 
-分屏的核心依赖渲染器能**按 id 绑定会话**（`SessionScope` 全局座位）。这是官方渲染器尚未提供的能力（已提交提案：[dsh-external/issues#486](https://github.com/dsh-external/issues/issues/486)），需要先让运行环境具备它：
+分屏的核心依赖渲染器能**按 id 绑定会话**（`SessionScope` 全局座位 + by-id 座位）。该能力（提案 [dsh-external/issues#486](https://github.com/dsh-external/issues/issues/486)）**已合入官方 DeepSeek Harness web 客户端**（当前开发快照开始）——安装插件即可，无需任何前置。
 
-| 方式 | 说明 |
-|---|---|
-| **官方合入后**（#486） | 纯插件安装，无需任何前置 |
-| **带能力的 DSH** | 使用已内置该能力的发行版（内测 fork） |
-| **渲染器补丁** | 对官方快照应用 `patches/dsh-renderer-session-scope-0809.patch`（约 450 行纯新增，应用方法见 [patches/README](patches/README.md)） |
+> 在早于该能力的 dsh 发行版上，插件无法安装：请升级 dsh，或参考 `patches/README.md` 中的存档补丁（仅针对旧快照）。
 
 ## 安装
 
@@ -42,7 +38,7 @@ dsh plugin --profile web add link:/path/to/dsh-split-panes
 ## 开发
 
 ```sh
-pnpm install        # devDeps link 到 ../test-lehhair（DSH fork 源码，需先构建其 client 包）
+pnpm install        # devDeps link 到 ../dsh2026/test-lehhair（DSH 源码，需先构建其 client 包）
 pnpm run check      # typecheck + test + build
 ```
 
@@ -58,9 +54,10 @@ src/client/
   pane-layout-store.ts     # 分屏树 store（split/close/ratio/splitPaneToSide）
   PaneDropOverlay.tsx      # 拖拽 drop-zone 高亮（ref 驱动）
   SplitContainer.tsx       # 分隔条容器（拖拽/键盘调节）
+  global-seats.ts          # GlobalStandardProps 类型合并（SessionScope/by-id 座位）
   PaneGlobal.module.css    # 插件全局 chrome（单行 header、渐变、内容留白、侧边栏融合）
 patches/
-  dsh-renderer-session-scope-0809.patch   # 渲染器能力补丁（对官方快照 20260807）
+  dsh-renderer-session-scope-0809.patch   # 存档：能力已合入官方，仅旧快照参考（见 README.md）
 ```
 
 ## License
