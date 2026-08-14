@@ -1,0 +1,841 @@
+diff --git a/packages/client/runtime/src/client/contract/sessions.ts b/packages/client/runtime/src/client/contract/sessions.ts
+index 27b9d2d13b..59172c8fc0 100644
+--- a/packages/client/runtime/src/client/contract/sessions.ts
++++ b/packages/client/runtime/src/client/contract/sessions.ts
+@@ -11,7 +11,9 @@ import type { Context } from '@deepseek-ai/cordis'
+ import type {
+   RpcResult, SessionId, SubagentAddress,
+ } from '@deepseek-ai/dsh-api-remotes/client'
+-import type { HostObservable, SessionMaybeProvideInfo } from '@deepseek-ai/dsh-client-ui-slots'
++import type {
++  HostObservable, SessionMaybeProvideInfo, SessionProvideInfo,
++} from '@deepseek-ai/dsh-client-ui-slots'
+ import type { AgentContext } from '../agents/scope.ts'
+ import type { SessionSearchResultItem } from '../sessions/manager.ts'
+ import type {
+@@ -127,4 +129,22 @@ export interface ISessions {
+    * @returns binding, or undefined for a session neither listed nor already scoped.
+    */
+   binding(id: SessionId): SessionBinding | undefined
++  /**
++   * Resolve one session's render-layer standard-props bundle by id — the
++   * by-id twin of the current-selection feed, backing the global
++   * useSessionById / useProjectionById seats. Lazily mints the session's
++   * scope on first touch, exactly like binding() (pure resolution, no
++   * staging).
++   * @param id - session id.
++   * @returns the identity-stable bundle, or undefined when the session is absent.
++   */
++  session(id: SessionId): SessionProvideInfo | undefined
++  /**
++   * The static no-session provide roster (identity-stable): the render
++   * bundle a session-aware subtree renders under when it must NOT follow the
++   * current selection — the SessionScope seat's absent-id branch (hero
++   * surfaces, new-conversation panes). Same shape as currentProvideInfo's
++   * no-session snapshot; deliberately a fixed reference, never live.
++   */
++  readonly emptyInfo: SessionMaybeProvideInfo
+ }
+diff --git a/packages/client/runtime/src/client/index.ts b/packages/client/runtime/src/client/index.ts
+index b5433bb573..db8cc08501 100644
+--- a/packages/client/runtime/src/client/index.ts
++++ b/packages/client/runtime/src/client/index.ts
+@@ -147,6 +147,15 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
+     useSessions: SnapshotSelectorHook<SessionListState>
+     /** Selector hook over real Workspaces and their independent baseline lifecycle. */
+     useWorkspaces: SnapshotSelectorHook<import('./workspaces/service.ts').WorkspaceListState>
++    /**
++     * The by-id seats and the SessionScope per-session render scope are
++     * injected into the standard kit by the renderer unconditionally, but
++     * their TYPES are merged by consumers that use them (`declare module
++     * '@deepseek-ai/dsh-client-ui-slots' { interface GlobalStandardProps {
++     * useSessionById; useProjectionById; SessionScope } }`) — the seats are
++     * optional capabilities, and keeping them out of the base seat keeps
++     * every props-constructing test free of three unused members.
++     */
+   }
+ }
+ 
+diff --git a/packages/client/runtime/src/client/sessions/service.ts b/packages/client/runtime/src/client/sessions/service.ts
+index c66da4e0d3..542c51a0e7 100644
+--- a/packages/client/runtime/src/client/sessions/service.ts
++++ b/packages/client/runtime/src/client/sessions/service.ts
+@@ -577,6 +577,19 @@ export class SessionRuntime implements ISessions {
+     return this.resolve(id)?.binding
+   }
+ 
++  /**
++   * Resolve one session's render-layer standard-props bundle by id — the
++   * by-id twin of the current-selection feed, backing the global
++   * useSessionById / useProjectionById seats. Lazily mints the session's
++   * scope on first touch, exactly like binding() (pure resolution, no
++   * staging); unknown or unlisted ids return undefined.
++   * @param id - session id.
++   * @returns the identity-stable bundle, or undefined when the session is absent.
++   */
++  session(id: SessionId): SessionProvideInfo | undefined {
++    return this.resolve(id)?.provideInfo
++  }
++
+   /**
+    * Resolve one session's render-layer standard-props bundle (ctx never
+    * enters the render layer; the renderer subscribes to
+@@ -596,6 +609,16 @@ export class SessionRuntime implements ISessions {
+     return (id === undefined ? undefined : this.provideInfo(id)) ?? this.provideChannel.maybeInfo
+   }
+ 
++  /**
++   * The static no-session provide roster (identity-stable): the SessionScope
++   * seat's absent-id branch renders hero surfaces under it — same shape as
++   * currentProvideInfo's no-session snapshot, but a fixed reference that
++   * never follows selection.
++   */
++  get emptyInfo(): SessionMaybeProvideInfo {
++    return this.provideChannel.maybeInfo
++  }
++
+   /**
+    * Move the stage to the list's current session: sweep teardowns deferred
+    * behind the previous occupant and pull the new occupant's history window.
+diff --git a/packages/client/runtime/src/client/slots.ts b/packages/client/runtime/src/client/slots.ts
+index c5680afacf..98549afce5 100644
+--- a/packages/client/runtime/src/client/slots.ts
++++ b/packages/client/runtime/src/client/slots.ts
+@@ -16,6 +16,7 @@
+  * redundancy. */
+ import { Service } from '@deepseek-ai/cordis'
+ import type { Context } from '@deepseek-ai/cordis'
++import type { SessionId } from '@deepseek-ai/dsh-client-connection/client'
+ import { SlotCore } from '@deepseek-ai/dsh-client-ui-slots'
+ import type {
+   LiveSlotNode, LocaleFace, OwnerOf, SlotEntryDef, SlotMap, SlotRenderer, SlotRendererHost,
+@@ -412,6 +413,11 @@ export class SlotRegistry extends Service {
+       sessions: {
+         list: sessions.list,
+         provideInfo: sessions.currentProvideInfo,
++        // Plain-string id at the host seam (branded SessionId applied at the
++        // component boundary); the service owns eligibility and scope minting.
++        session: id => sessions.session(id as SessionId),
++        // Fixed no-session roster for the SessionScope absent-id branch.
++        emptyInfo: sessions.emptyInfo,
+       },
+       workspaces: { list: workspaces.list },
+       get locale() { return service._locale },
+diff --git a/packages/client/runtime/tests/sessions-service.client.spec.ts b/packages/client/runtime/tests/sessions-service.client.spec.ts
+index b135b56ebe..d911851c4f 100644
+--- a/packages/client/runtime/tests/sessions-service.client.spec.ts
++++ b/packages/client/runtime/tests/sessions-service.client.spec.ts
+@@ -747,3 +747,26 @@ describe('coverage tails (branch duals)', () => {
+   })
+ 
+ })
++
++
++describe('by-id render bundle (session/emptyInfo)', () => {
++  it('resolves an identity-stable bundle per listed session and undefined for unknown ids', async () => {
++    const b = bench()
++    await feedList(b, [{ id: 's1' }, { id: 's2' }])
++    const first = b.svc.session(sid('s1'))
++    expect(first?.sessionId).toBe('s1')
++    expect(first?.hooks['session']).toBeDefined()
++    // Identity-stable: the same bundle until the roster changes.
++    expect(b.svc.session(sid('s1'))).toBe(first)
++    expect(b.svc.session(sid('ghost'))).toBeUndefined()
++  })
++
++  it('emptyInfo is the identity-stable static no-session roster, distinct from a session bundle', async () => {
++    const b = bench()
++    await feedList(b, [{ id: 's1' }])
++    const empty = b.svc.emptyInfo
++    expect(empty.sessionId).toBeUndefined()
++    expect(b.svc.emptyInfo).toBe(empty)
++    expect(b.svc.session(sid('s1'))?.sessionId).toBe('s1')
++  })
++})
+diff --git a/packages/client/ui-layout/src/client/AppFrame.tsx b/packages/client/ui-layout/src/client/AppFrame.tsx
+index 2696dc91fa..33f036594c 100644
+--- a/packages/client/ui-layout/src/client/AppFrame.tsx
++++ b/packages/client/ui-layout/src/client/AppFrame.tsx
+@@ -20,7 +20,7 @@ import css from './AppFrame.module.css'
+ /** Full composed props: runtime share + child-slot render share + store share. */
+ export type AppFrameProps =
+   & PropsRuntime<'root'>
+-  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay'>
++  & PropsRenderSlots<'sidebar' | 'conversation' | 'conversation.panes' | 'details' | 'shell.overlay'>
+   & PropsStore<ReturnType<typeof createLayoutStore>>
+ 
+ /** Center column grid item (session-body building block). */
+@@ -186,8 +186,19 @@ export function AppFrame({
+             paint — no loading gate: a bare status line reads worse than
+             the shell's own pending rendering. The conversation
+             is session-maybe; the strict details entry naturally renders
+-            empty while no session is current. */}
+-        <CenterColumn>{renderSlot('conversation', {})}</CenterColumn>
++            empty while no session is current. The center column renders
++            through the 'conversation.panes' wrapping seam: a registered pane
++            surface (ui-panes) wraps the stock conversation (the
++            owner-passed render-prop) inside its own frame; with no
++            registrant the same render is the fallback, so the column is
++            byte-for-byte the stock conversation either way. */}
++        <CenterColumn>
++          {renderSlot(
++            'conversation.panes',
++            { renderConversation: () => renderSlot('conversation', {}) },
++            { fallback: renderSlot('conversation', {}) },
++          )}
++        </CenterColumn>
+         <DetailsColumn>{renderSlot('details', {})}</DetailsColumn>
+       </>
+       <div className={css.overlayLayer} data-shell-overlay>
+diff --git a/packages/client/ui-layout/src/client/index.ts b/packages/client/ui-layout/src/client/index.ts
+index c56d83bfbb..8be6b2afe2 100644
+--- a/packages/client/ui-layout/src/client/index.ts
++++ b/packages/client/ui-layout/src/client/index.ts
+@@ -60,6 +60,15 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
+      * framework hooks of the `session-maybe` scope.
+      */
+     'conversation': { kind: 'single'; scope: 'session-maybe'; owner: ConvOwnerProps }
++    /**
++     * Wrapping seam over the stock conversation column: the frame renders
++     * this when an entry occupies it (a pane plugin wraps the owner-passed
++     * conversation renderer in its own surface), falling back to the plain
++     * conversation render otherwise. ROOT scope: the split tree is global
++     * viewing state — switching sessions must not rebuild it; panes pin
++     * their own sessions through the SessionScope seat.
++     */
++    'conversation.panes': { kind: 'single'; scope: 'root'; owner: ConvPanesOwnerProps }
+     /**
+      * The right details column, shown when the layout opens it. OCCUPIED by
+      * ui-conversation's DetailsPanel, which declares the tool-details seat
+@@ -101,6 +110,18 @@ export interface SidebarOwnerProps {
+ /** Conversation owner share: business state and actions belong to the registrant. */
+ export interface ConvOwnerProps {}
+ 
++/**
++ * Conversation-panes owner share: the wrapping plugin cannot declare the
++ * 'conversation' slot itself (one declarer per slot — ui-layout owns it), so
++ * the frame hands its own render authorization down as a render-prop — the
++ * same currency the framework's SessionProvider seat uses. The pane surface
++ * calls it inside its frame; the stock fallback is the same render.
++ */
++export interface ConvPanesOwnerProps {
++  /** Render the stock conversation column (session-maybe; call during render). */
++  renderConversation: () => import('react').ReactNode
++}
++
+ /** Details owner share: empty — sessionId arrives as a framework-standard prop. */
+ export interface DetailsOwnerProps {}
+ 
+@@ -122,6 +143,7 @@ export function apply(ctx: ClientContext): void {
+       children: {
+         'sidebar': { kind: 'single', scope: 'root' },
+         'conversation': { kind: 'single', scope: 'session-maybe' },
++        'conversation.panes': { kind: 'single', scope: 'root' },
+         'details': { kind: 'single', scope: 'session' },
+         'shell.overlay': { kind: 'list', scope: 'root' },
+       },
+diff --git a/packages/client/ui-layout/tests/app-frame.client.spec.tsx b/packages/client/ui-layout/tests/app-frame.client.spec.tsx
+index 65de5a640e..675316c52e 100644
+--- a/packages/client/ui-layout/tests/app-frame.client.spec.tsx
++++ b/packages/client/ui-layout/tests/app-frame.client.spec.tsx
+@@ -56,10 +56,17 @@ function mountFrame() {
+   window.innerWidth = frameWidth // first-render viewport source before the observer fires
+   const instance = createLayoutStore().create()
+   const slotCalls: { key: string; props: unknown }[] = []
+-  const renderSlot = ((key: string, owner: object) => {
++  const renderSlot = ((key: string, owner: { renderConversation?: () => React.ReactNode }, opts?: { fallback?: React.ReactNode }) => {
+     slotCalls.push({ key, props: owner })
+     if (key === 'sidebar') return <div data-testid="sidebar-content" />
+     if (key === 'conversation') return <div data-testid="center-content" />
++    if (key === 'conversation.panes') {
++      // The wrapping seam: the frame renders the seam with the stock
++      // conversation as the owner render-prop; a registrant calls it (this
++      // stub has none, so the render-prop is the fallback call the frame
++      // made at its own render site).
++      return owner.renderConversation?.() ?? opts?.fallback ?? null
++    }
+     if (key === 'details') return <div data-testid="details-content" />
+     if (key === 'conversation.empty') return <div data-testid="empty-content" />
+     return <div data-testid="other-content" />
+diff --git a/packages/client/ui-primitives/src/index.ts b/packages/client/ui-primitives/src/index.ts
+index 05baf26f8d..96891ce95f 100644
+--- a/packages/client/ui-primitives/src/index.ts
++++ b/packages/client/ui-primitives/src/index.ts
+@@ -41,6 +41,14 @@ export { WebBlock } from './WebBlock.tsx'
+ export type { WebBlockProps, WebSearchBlockProps, WebFetchBlockProps, WebSourceView } from './WebBlock.tsx'
+ export { CodeBlock } from './markdown/CodeBlock.tsx'
+ export type { CodeBlockProps } from './markdown/CodeBlock.tsx'
++// The per-line shiki token path, shared with the read card and external
++// plugins (a platform export: cross-package callers import these through
++// the package root — ui-primitives is a shared platform module, so the
++// shiki machinery stays in the shell bundle, never in a plugin's).
++export { grammarLoadCount, highlightLines, subscribeGrammarLoaded } from './markdown/highlight.ts'
++export type { HighlightSpan } from './markdown/highlight.ts'
++export { useCopyFeedback } from './use-copy-feedback.ts'
++export type { CopyFeedback } from './use-copy-feedback.ts'
+ export { JsonBlock } from './markdown/JsonBlock.tsx'
+ export { MarkdownText } from './markdown/MarkdownText.tsx'
+ export type { MarkdownCodeLabels, MarkdownFileMentions } from './markdown/MarkdownText.tsx'
+diff --git a/packages/client/ui-slots/src/index.ts b/packages/client/ui-slots/src/index.ts
+index 00e2eaaf7c..3f34fab9f9 100644
+--- a/packages/client/ui-slots/src/index.ts
++++ b/packages/client/ui-slots/src/index.ts
+@@ -324,6 +324,48 @@ export interface SessionAreaProps {
+  */
+ export type SessionProviderComponent = (props: SessionAreaProps) => ReactNode
+ 
++/**
++ * By-id conversation-session selector hook (global seat family): subscribe
++ * to any session's conversation snapshot by explicit id — the pane/root
++ * twin of the current-session useSession. Absent or unresolvable ids read
++ * undefined via the shared absent branch (hook order stays constant).
++ * The runtime narrows Snap at its export seam.
++ */
++export type UseSessionById<Snap extends object = object> =
++  <T>(id: SessionIdOf | undefined, selector: (snapshot: Snap) => T, eq?: (a: T, b: T) => boolean) => T | undefined
++
++/**
++ * By-id projection reader (global seat family): key-addressed values off an
++ * arbitrary session's projection store. Absent id, session, or key read
++ * undefined — capability absence — with the same selector overload as the
++ * session-scope useProjection seat.
++ */
++export type UseProjectionById = {
++  (id: SessionIdOf | undefined, key: string): unknown
++  <S>(id: SessionIdOf | undefined, key: string, selector: (value: unknown) => S, eq?: (a: S, b: S) => boolean): S
++}
++
++/**
++ * Props of the standard-kit SessionScope seat: render a subtree under an
++ * EXPLICIT session's provide bundle (or the static no-session roster when
++ * the id is absent) instead of the current selection. The by-id twin of the
++ * SessionProvider area — pane roots bind each pane's conversation to its own
++ * session while the global selection moves independently.
++ */
++export interface SessionScopeProps {
++  /** Target session id; absent renders the static no-session bundle (hero). */
++  sessionId?: SessionIdOf | undefined
++  /** Subtree rendered under the chosen bundle. */
++  children: ReactNode
++}
++
++/**
++ * Framework-wired per-session scope component (global standard kit): it
++ * resolves the requested session's provide bundle by id and overrides the
++ * render scope for its subtree; business code does not import it directly.
++ */
++export type SessionScopeComponent = (props: SessionScopeProps) => ReactNode
++
+ /**
+  * Child-slot render share: `renderSlot` statically narrowed to the entry's
+  * declared children keys. Delegation is plain props passing (hand
+diff --git a/packages/client/ui-slots/src/renderer.ts b/packages/client/ui-slots/src/renderer.ts
+index cdad4191ea..9873f05902 100644
+--- a/packages/client/ui-slots/src/renderer.ts
++++ b/packages/client/ui-slots/src/renderer.ts
+@@ -171,6 +171,24 @@ export interface SlotRendererHost {
+      * undefined while no current session resolves.
+      */
+     provideInfo: HostObservable<SessionMaybeProvideInfo>
++    /**
++     * Resolve one session's render-layer standard-props bundle by explicit
++     * id — the by-id twin of provideInfo, backing the global
++     * useSessionById / useProjectionById seats (pane roots, cross-session
++     * read views). Unknown or unlisted ids return undefined (the absent
++     * branch), never a partial bundle.
++     * @param id - session id.
++     * @returns the identity-stable bundle, or undefined when the session is absent.
++     */
++    session(id: string): SessionProvideInfo | undefined
++    /**
++     * The static no-session roster (identity-stable): the provide bundle a
++     * session-aware subtree renders under when it must NOT follow the
++     * current selection — the SessionScope seat's absent-id branch (hero
++     * surfaces, new-conversation panes). Same shape as provideInfo's
++     * no-session snapshot; deliberately a fixed reference, never live.
++     */
++    emptyInfo: SessionMaybeProvideInfo
+   }
+   /** Workspace-side standard-kit sources. */
+   workspaces: {
+diff --git a/packages/client/web-react/src/index.ts b/packages/client/web-react/src/index.ts
+index 5debff6865..83dc2477ae 100644
+--- a/packages/client/web-react/src/index.ts
++++ b/packages/client/web-react/src/index.ts
+@@ -13,11 +13,14 @@ export type UseSession<Snap extends object = object> = SnapshotSelectorHook<Snap
+ 
+ export type {
+   ChainRenderOpts, HostObservable, RenderOpts, SessionProvideInfo, SnapshotSelectorHook,
+-  SlotRenderer, SlotRendererHost, StoreInstanceLike,
++  SlotRenderer, SlotRendererHost, StoreInstanceLike, UseProjectionById, UseSessionById,
+ } from '@deepseek-ai/dsh-client-ui-slots'
+ export { SlotOwnershipError, StaleAuthorizationError } from '@deepseek-ai/dsh-client-ui-slots'
+ export { createSlotRenderer } from './scoped-slots.tsx'
+ 
+-export { SessionProvider, SlotAssemblyError, type SessionProviderProps } from './session-provider.tsx'
++export {
++  SessionProvider, SessionScope, SlotAssemblyError,
++  type SessionProviderProps,
++} from './session-provider.tsx'
+ 
+ export { useInvoke } from './use-invoke.ts'
+diff --git a/packages/client/web-react/src/scoped-slots.tsx b/packages/client/web-react/src/scoped-slots.tsx
+index dea0511319..3ab48127dc 100644
+--- a/packages/client/web-react/src/scoped-slots.tsx
++++ b/packages/client/web-react/src/scoped-slots.tsx
+@@ -10,8 +10,9 @@ import {
+   type SlotScope, type StoredEntry, type Translate,
+ } from '@deepseek-ai/dsh-client-ui-slots'
+ import {
+-  HostContext, SessionMaybeProvider, SessionProvider, SlotAssemblyError, maybeObservableHook,
+-  observableHook, projectionHook, useHost, useSessionMaybeProvideInfo,
++  HostContext, SessionMaybeProvider, SessionProvider, SessionScope, SlotAssemblyError, maybeObservableHook,
++  observableHook, projectionByIdSeat, projectionHook, sessionByIdSeat, useHost,
++  useSessionMaybeProvideInfo,
+ } from './session-provider.tsx'
+ 
+ type InjectedProps = Record<string, unknown>
+@@ -352,6 +353,15 @@ function standardProps(
+       root: {
+         useSessions: observableHook(host.sessions.list),
+         useWorkspaces: observableHook(host.workspaces.list),
++        // By-id seats (global kit family): subscribe to arbitrary sessions by
++        // explicit id — pane roots and cross-session read views. Identity-stable
++        // per host (sessionByIdSeat/projectionByIdSeat cache by host identity).
++        useSessionById: sessionByIdSeat(host),
++        useProjectionById: projectionByIdSeat(host),
++        // Per-session scope component (global seat): explicit-id binding for
++        // pane roots — module-level reference = identity-stable for memoized
++        // consumers, same as the SessionProvider seat.
++        SessionScope,
+       },
+       session: new WeakMap(),
+       sessionMaybe: new WeakMap(),
+diff --git a/packages/client/web-react/src/session-provider.tsx b/packages/client/web-react/src/session-provider.tsx
+index 196a4d9fd9..07a923d263 100644
+--- a/packages/client/web-react/src/session-provider.tsx
++++ b/packages/client/web-react/src/session-provider.tsx
+@@ -1,8 +1,8 @@
+ /** Internal React bindings for the renderer host and active session provide bundle. */
+-import { createContext, useContext, type ReactNode } from 'react'
++import { createContext, useContext, useSyncExternalStore, type ReactNode } from 'react'
+ import type {
+   HostObservable, MaybeSnapshotSelectorHook, SessionMaybeProvideInfo, SessionProvideInfo,
+-  SlotRendererHost, SnapshotSelectorHook,
++  SessionScopeProps, SlotRendererHost, SnapshotSelectorHook,
+ } from '@deepseek-ai/dsh-client-ui-slots'
+ import { bindSnapshotSelector } from './bind.ts'
+ 
+@@ -158,3 +158,108 @@ export function SessionProvider({ empty, children }: SessionProviderProps) {
+     </BindingContext.Provider>
+   )
+ }
++
++/** The global useSessionById seat call signature (wide at this layer; runtime narrows at its merge). */
++type SessionByIdSeat = (
++  id: string | undefined,
++  selector: (snapshot: object) => unknown,
++  eq?: (a: unknown, b: unknown) => boolean,
++) => unknown
++
++/** The global useProjectionById seat call signature (wide; the selector overload narrows returns). */
++type ProjectionByIdSeat = {
++  (id: string | undefined, key: string): unknown
++  <S>(id: string | undefined, key: string, selector: (value: unknown) => S, eq?: (a: S, b: S) => boolean): S
++}
++
++const sessionByIdSeatCache = new WeakMap<SlotRendererHost, SessionByIdSeat>()
++
++/**
++ * By-id session binding seat (global standard kit): resolves the session's
++ * render bundle through the host (`host.sessions.session`) and binds its
++ * conversation source. The seat function is created once per host
++ * (identity-stable for memoized consumers); each call binds per id through
++ * the shared per-source cache, so an id change swaps the subscription
++ * without hook-order churn. Absent or unresolvable ids read undefined via
++ * the shared absent branch (hook order stays constant).
++ * @param host - the installed renderer host.
++ * @returns the by-id selector seat.
++ */
++export function sessionByIdSeat(host: SlotRendererHost): SessionByIdSeat {
++  let seat = sessionByIdSeatCache.get(host)
++  if (seat === undefined) {
++    seat = (id, selector, eq) => {
++      const info = id === undefined ? undefined : host.sessions.session(id)
++      const useValue = maybeObservableHook(info?.hooks['session'])
++      return useValue(selector as (snapshot: unknown) => unknown, eq)
++    }
++    sessionByIdSeatCache.set(host, seat)
++  }
++  return seat
++}
++
++const projectionByIdSeatCache = new WeakMap<SlotRendererHost, ProjectionByIdSeat>()
++
++/** Single-signature implementation of the overloaded projection seat (the public face declares the overloads). */
++type ProjectionByIdImpl = (
++  id: string | undefined,
++  key: string,
++  selector: ((value: unknown) => unknown) | undefined,
++  eq: ((a: unknown, b: unknown) => boolean) | undefined,
++) => unknown
++
++/**
++ * By-id projection seat (global standard kit): key-addressed value face off
++ * an arbitrary session's projection store, mirroring the session-scope
++ * useProjection seat (absent id, session, or key reads undefined — capability
++ * absence — with the same selector overload). Seat identity follows
++ * sessionByIdSeat: one function per host, cached by host identity.
++ * @param host - the installed renderer host.
++ * @returns the by-id projection seat.
++ */
++export function projectionByIdSeat(host: SlotRendererHost): ProjectionByIdSeat {
++  let seat = projectionByIdSeatCache.get(host)
++  if (seat === undefined) {
++    const impl: ProjectionByIdImpl = (id, key, selector, eq) => {
++      const info = id === undefined ? undefined : host.sessions.session(id)
++      const useValue = maybeObservableHook(info?.projections?.faceOf(key))
++      if (selector !== undefined) return useValue(selector, eq)
++      return useValue(value => value)
++    }
++    seat = impl as ProjectionByIdSeat
++    projectionByIdSeatCache.set(host, seat)
++  }
++  return seat
++}
++
++/**
++ * Per-session render scope (global standard kit): renders a subtree under an
++ * EXPLICIT session's provide bundle instead of the current selection — pane
++ * roots bind each pane's conversation to its own session while the global
++ * selection moves independently. An absent id binds the STATIC no-session
++ * roster (hero surfaces); an id whose session has not materialized yet
++ * renders nothing until it does (the parent's live data re-renders then).
++ * @param props - target id + subtree.
++ * @returns the scoped subtree, or nothing while the session is unresolved.
++ */
++export function SessionScope({ sessionId, children }: SessionScopeProps) {
++  const host = useHost()
++  // Re-resolve when the session roster changes: a pinned session may first
++  // appear (or vanish) after this component rendered — the parent tree can
++  // bail out on an unchanged children reference, so the scope subscribes to
++  // the roster itself (list snapshots are identity-stable between changes).
++  useSyncExternalStore(
++    (fn: () => void) => host.sessions.list.subscribe(fn),
++    () => host.sessions.list.getSnapshot(),
++  )
++  const info = sessionId === undefined ? host.sessions.emptyInfo : host.sessions.session(sessionId)
++  if (info === undefined) return null
++  // key={sessionId} remounts the subtree on a session switch, exactly like
++  // SessionProvider — a pane's component-local state must never leak across
++  // the sessions it is bound to. The absent-id hero keeps the constant key.
++  return (
++    <BindingContext.Provider key={sessionId ?? 'none'} value={info}>
++      {children}
++    </BindingContext.Provider>
++  )
++}
+diff --git a/packages/client/web-react/tests/scoped-slots-real-core.client.spec.tsx b/packages/client/web-react/tests/scoped-slots-real-core.client.spec.tsx
+index 0e94030729..883b7c7ba2 100644
+--- a/packages/client/web-react/tests/scoped-slots-real-core.client.spec.tsx
++++ b/packages/client/web-react/tests/scoped-slots-real-core.client.spec.tsx
+@@ -39,6 +39,8 @@ function hostOver(core: SlotCore): SlotRendererHost {
+     sessions: {
+       list: { getSnapshot: () => ({}), subscribe: () => () => {} },
+       provideInfo: { getSnapshot: () => absentInfo, subscribe: () => () => {} },
++      session: () => undefined,
++      emptyInfo: absentInfo,
+     },
+     workspaces: {
+       list: { getSnapshot: () => ({}), subscribe: () => () => {} },
+@@ -124,3 +126,4 @@ describe('createSlotRenderer over the real SlotCore', () => {
+     expect(() => captured!('spec.single', {})).toThrow(StaleAuthorizationError)
+   })
+ })
++
+diff --git a/packages/client/web-react/tests/scoped-slots.client.spec.tsx b/packages/client/web-react/tests/scoped-slots.client.spec.tsx
+index b5d7e2d3b1..1db92b5a61 100644
+--- a/packages/client/web-react/tests/scoped-slots.client.spec.tsx
++++ b/packages/client/web-react/tests/scoped-slots.client.spec.tsx
+@@ -151,6 +151,8 @@ function makeHost() {
+     sessions: {
+       list,
+       provideInfo: provide,
++      session: () => undefined,
++      emptyInfo: absentInfo,
+     },
+     workspaces: { list: workspaces },
+   }
+@@ -1027,3 +1029,4 @@ describe('session-maybe adoption identity', () => {
+     expect(view.container.textContent).toBe('s1#1')
+   })
+ })
++
+diff --git a/packages/client/web-react/tests/session-provider.client.spec.tsx b/packages/client/web-react/tests/session-provider.client.spec.tsx
+index af46f4138b..5eefc481d0 100644
+--- a/packages/client/web-react/tests/session-provider.client.spec.tsx
++++ b/packages/client/web-react/tests/session-provider.client.spec.tsx
+@@ -56,6 +56,8 @@ function makeHost(bodies: { root: (rp: (key: string, owner: object) => React.Rea
+     sessions: {
+       list: observable<unknown>({ ids: [] }),
+       provideInfo: provide,
++      session: () => undefined,
++      emptyInfo: absentInfo,
+     },
+     workspaces: { list: observable<unknown>({ items: [] }) },
+   }
+@@ -195,3 +197,4 @@ describe('SessionProvider', () => {
+     spy.mockRestore()
+   })
+ })
++
+diff --git a/packages/client/web-react/tests/session-scope.client.spec.tsx b/packages/client/web-react/tests/session-scope.client.spec.tsx
+new file mode 100644
+index 0000000000..3d868684ec
+--- /dev/null
++++ b/packages/client/web-react/tests/session-scope.client.spec.tsx
+@@ -0,0 +1,179 @@
++// @vitest-environment jsdom
++/**
++ * SessionScope behavior account (explicit-id per-session render scope):
++ * binds a subtree to an arbitrary session's provide bundle while the global
++ * selection moves independently, renders the static no-session roster under
++ * an absent id, and stays empty until a pinned session materializes. The
++ * by-id seats (useSessionById / useProjectionById) ride the same host
++ * resolution — asserted through observable behavior, never through the
++ * internal BindingContext.
++ */
++import { useEffect } from 'react'
++import { describe, expect, it } from 'vitest'
++import { act, render } from '@testing-library/react'
++import type { SessionMaybeProvideInfo, StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
++import type { SessionId } from '@deepseek-ai/dsh-client-connection/client'
++import {
++  createSlotRenderer, SessionScope,
++  type SessionProvideInfo, type SlotRendererHost,
++} from '@deepseek-ai/dsh-client-web-react'
++
++function observable<T>(initial: T) {
++  let value = initial
++  const subs = new Set<() => void>()
++  return {
++    getSnapshot: () => value,
++    subscribe: (fn: () => void) => { subs.add(fn); return () => { subs.delete(fn) } },
++    set: (next: T) => { value = next; for (const fn of [...subs]) fn() },
++  }
++}
++
++/**
++ * Minimal host with the by-id seam: `sessions.session(id)` resolves per-id
++ * bundles and `sessions.emptyInfo` is the fixed no-session roster, exactly
++ * the members the production SlotRegistry host face supplies.
++ */
++function makeHost(bodies: { root: (renderSlot: (key: string, owner: object) => React.ReactNode) => React.ReactNode }) {
++  const absentInfo: SessionMaybeProvideInfo = { sessionId: undefined, hooks: { session: undefined }, props: {} }
++  const list = observable<unknown>({ ids: [] as string[] })
++  const infos = new Map<string, SessionProvideInfo>()
++  const sessionEntries: StoredEntry[] = []
++  const rootEntry: StoredEntry = {
++    component: (props: { renderSlot: (key: string, owner: object) => React.ReactNode }) =>
++      <>{bodies.root(props.renderSlot)}</>,
++    options: {},
++    children: { 'k.session': { kind: 'single', scope: 'session' } },
++  }
++  const host: SlotRendererHost = {
++    subscribe: () => () => {},
++    getVersion: () => 0,
++    entriesOf: key => key === 'root' ? [rootEntry] : sessionEntries,
++    entriesOfSlot: key => key === 'root' ? [rootEntry] : sessionEntries,
++    reportEntryError: () => {},
++    specOf: key => key === 'k.session' ? { kind: 'single', scope: 'session' } : undefined,
++    isLive: () => true,
++    storeOf: () => undefined,
++    sessions: {
++      list,
++      provideInfo: observable<SessionMaybeProvideInfo>(absentInfo),
++      session: id => infos.get(id),
++      emptyInfo: absentInfo,
++    },
++    workspaces: { list: observable<unknown>({ items: [] }) },
++  }
++  return {
++    host,
++    addSession: (id: string) => {
++      const info: SessionProvideInfo = {
++        sessionId: id as SessionId,
++        hooks: { session: { getSnapshot: () => ({ sid: id }), subscribe: () => () => {} } },
++        props: {},
++      }
++      infos.set(id, info)
++      list.set({ ids: [...infos.keys()] })
++      return info
++    },
++    registerSession: (entry: StoredEntry) => { sessionEntries.push(entry) },
++  }
++}
++
++describe('SessionScope', () => {
++  it('binds the subtree to the pinned session bundle regardless of the global selection', () => {
++    const seen: string[] = []
++    const h = makeHost({
++      root: renderSlot => (
++        <SessionScope sessionId={'s1' as SessionId}>
++          {renderSlot('k.session', {})}
++        </SessionScope>
++      ),
++    })
++    h.addSession('s1')
++    h.addSession('s2')
++    h.addSession('s3')
++    h.registerSession({
++      component: (props: { useSession?: <S>(sel: (s: { sid: string }) => S) => S; sessionId?: string }) => {
++        seen.push(`${props.sessionId}:${props.useSession!(s => s.sid)}`)
++        return null
++      },
++      options: {},
++    })
++    render(<>{createSlotRenderer().renderRoot(h.host, {})}</>)
++    // The scope's own bundle (s1), not the current selection (undefined).
++    expect(seen.at(-1)).toBe('s1:s1')
++  })
++
++  it('renders the static no-session roster when the pinned id is absent (hero branch)', () => {
++    const seen: unknown[] = []
++    const h = makeHost({
++      root: renderSlot => (
++        <SessionScope sessionId={undefined}>
++          {renderSlot('k.session', {})}
++        </SessionScope>
++      ),
++    })
++    h.addSession('s1')
++    h.registerSession({
++      component: (props: { useSession?: <S>(sel: (s: { sid: string }) => S) => S; sessionId?: string }) => {
++        seen.push(props.sessionId)
++        return null
++      },
++      options: {},
++    })
++    render(<>{createSlotRenderer().renderRoot(h.host, {})}</>)
++    // The absent branch renders nothing (no definite session to mount).
++    expect(seen).toEqual([])
++  })
++
++  it('stays empty until a pinned session materializes on the roster', () => {
++    const seen: string[] = []
++    const h = makeHost({
++      root: renderSlot => (
++        <SessionScope sessionId={'late' as SessionId}>
++          {renderSlot('k.session', {})}
++        </SessionScope>
++      ),
++    })
++    h.registerSession({
++      component: (props: { useSession?: <S>(sel: (s: { sid: string }) => S) => S; sessionId?: string }) => {
++        seen.push(`${props.sessionId}:${props.useSession!(s => s.sid)}`)
++        return null
++      },
++      options: {},
++    })
++    const view = render(<>{createSlotRenderer().renderRoot(h.host, {})}</>)
++    expect(seen).toEqual([])
++    // The session appears later: the scope re-resolves off the roster change.
++    act(() => { h.addSession('late') })
++    expect(seen.at(-1)).toBe('late:late')
++    void view
++  })
++
++  it('remounts the subtree when the pinned session switches (key semantics, like SessionProvider)', () => {
++    let mounts = 0
++    function Body({ id }: { id: string }) {
++      useEffect(() => { mounts += 1 }, [])
++      return <div data-testid="body">{id}</div>
++    }
++    let pinned = 's1' as SessionId
++    const h = makeHost({
++      root: renderSlot => (
++        <SessionScope sessionId={pinned}>
++          {renderSlot('k.session', {})}
++        </SessionScope>
++      ),
++    })
++    h.addSession('s1')
++    h.addSession('s2')
++    h.registerSession({
++      component: (props: { sessionId?: string }) => <Body id={props.sessionId ?? ''} />,
++      options: {},
++    })
++    const view = render(<>{createSlotRenderer().renderRoot(h.host, {})}</>)
++    expect(mounts).toBe(1)
++    // Switching the pinned session remounts the subtree — component-local
++    // state never leaks across the sessions a pane is bound to.
++    pinned = 's2' as SessionId
++    act(() => { view.rerender(<>{createSlotRenderer().renderRoot(h.host, {})}</>) })
++    expect(mounts).toBe(2)
++  })
++})
+diff --git a/packages/client/web-react/tests/stale-authorization.client.spec.tsx b/packages/client/web-react/tests/stale-authorization.client.spec.tsx
+index e617ddecdd..fb6f3fa204 100644
+--- a/packages/client/web-react/tests/stale-authorization.client.spec.tsx
++++ b/packages/client/web-react/tests/stale-authorization.client.spec.tsx
+@@ -45,6 +45,8 @@ function makeHost() {
+     sessions: {
+       list: { getSnapshot: () => ({}), subscribe: () => () => {} },
+       provideInfo: { getSnapshot: () => absentInfo, subscribe: () => () => {} },
++      session: () => undefined,
++      emptyInfo: absentInfo,
+     },
+     workspaces: {
+       list: { getSnapshot: () => ({}), subscribe: () => () => {} },
+@@ -139,3 +141,4 @@ describe('stale authorization', () => {
+     expect(() => first.binding('k.child', {})).toThrow(StaleAuthorizationError)   // old stays dead
+   })
+ })
++
+diff --git a/packages/client/web-react/tests/use-projection.client.spec.tsx b/packages/client/web-react/tests/use-projection.client.spec.tsx
+index 1af4f1abb1..b923aea5dc 100644
+--- a/packages/client/web-react/tests/use-projection.client.spec.tsx
++++ b/packages/client/web-react/tests/use-projection.client.spec.tsx
+@@ -59,6 +59,8 @@ function makeHost() {
+     sessions: {
+       list: observable<unknown>({ ids: [] }),
+       provideInfo: provide,
++      session: () => undefined,
++      emptyInfo: absentInfo,
+     },
+     workspaces: { list: observable<unknown>({ items: [] }) },
+   }
+@@ -131,3 +133,4 @@ describe('useProjection standard-kit delivery', () => {
+     expect(reads.at(-1)).toBeUndefined()
+   })
+ })
++
+diff --git a/packages/test-support/client-runtime/src/sessions.ts b/packages/test-support/client-runtime/src/sessions.ts
+index c014d6f002..a063a6b86c 100644
+--- a/packages/test-support/client-runtime/src/sessions.ts
++++ b/packages/test-support/client-runtime/src/sessions.ts
+@@ -348,6 +348,24 @@ export class TestSessions implements ISessions {
+     return (id === undefined ? undefined : this.provideInfo(id)) ?? this.channel.maybeInfo
+   }
+ 
++  /**
++   * Resolve one session's render-layer standard-props bundle by id (the
++   * ISessions by-id twin of the current-selection feed).
++   * @param id - session id.
++   * @returns the identity-stable bundle, or undefined when the session is absent.
++   */
++  session(id: SessionId): SessionProvideInfo | undefined {
++    return this.provideInfo(id)
++  }
++
++  /**
++   * The static no-session provide roster (identity-stable): the SessionScope
++   * seat's absent-id branch renders hero surfaces under it.
++   */
++  get emptyInfo(): SessionMaybeProvideInfo {
++    return this.channel.maybeInfo
++  }
++
+   /**
+    * Resolve (mint on first touch) the session-scoped Cordis context through
+    * the production `createScope`, so real `scopeOf`/scope-addressed services

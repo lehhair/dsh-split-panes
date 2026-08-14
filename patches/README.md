@@ -1,46 +1,49 @@
-# Renderer capability — merged upstream (no patch needed)
+# Renderer capability patch (ships with the ui-panes plugin)
 
-The renderer-level capabilities this plugin needs (`SessionScope` per-session
-render scope, the by-id seats `useSessionById` / `useProjectionById`, and the
-`conversation.panes` wrapping seam) are now **part of the official DeepSeek
-Harness web client** (the session-scope proposal #486 landed in the current
-development snapshot). Install the plugin as-is — no patch, no fork, no
-capability-carrying distribution:
+The pane-split plugin needs renderer-level capabilities that the OFFICIAL DeepSeek Harness web client (including the current `0.1.0-rc.5` release) does not ship: rendering a conversation subtree bound to an EXPLICIT session (`SessionScope` + by-id seats) and a wrapping seam over the stock conversation column (`conversation.panes`). These are not reachable from a plugin — the renderer's session-binding mechanism (React context + the standard-kit seat injection) is private, the released frontend is a pre-built `dist/`, and the `conversation` slot is exclusively owned by ui-conversation.
+
+Proposal posted upstream: https://github.com/deepseek-ai/deepseek-harness/discussions/604
+
+## What the patch adds (21 files, ~500 lines, all additive)
+
+| Area | Addition |
+|---|---|
+| `packages/client/runtime` | `ISessions.session(id)` (by-id render bundle, lazy scope mint like `binding()`) + `emptyInfo` (static no-session roster); `SlotRegistry` host face wires both; `SessionRuntime` implements them |
+| `packages/client/ui-slots` | Types: `UseSessionById`, `UseProjectionById`, `SessionScopeProps`, `SessionScopeComponent`; `SlotRendererHost.sessions.session(id)` + `emptyInfo` members |
+| `packages/client/web-react` | `SessionScope` component (render a subtree under an EXPLICIT session's bundle; `key={sessionId}` remount semantics like `SessionProvider`), the by-id seats (`sessionByIdSeat` / `projectionByIdSeat`), injected into every entry's standard kit, exported |
+| `packages/client/ui-layout` | `conversation.panes` seam (root scope): the frame renders it around the stock conversation (owner render-prop `renderConversation` + stock fallback — byte-identical without a registrant) |
+| `packages/client/ui-primitives` | Platform exports of the per-line highlighter and the copy-feedback hook (`highlightLines` / `grammarLoadCount` / `subscribeGrammarLoaded` / `useCopyFeedback`) |
+| tests | `SessionScope` behavior (binding / absent / late-arrival / remount), runtime `session`/`emptyInfo` cases, frame seam stub updates, host-mock additions |
+
+All changes are pure additions — no existing behavior is altered, so the stock GUI stays byte-for-byte identical without the plugin.
+
+## Apply
+
+From the DSH repository root (baseline: the official `deepseek-ai/deepseek-harness` `0.1.0-rc.5` release — the `dsh` family version `0.1.0-rc.5`):
 
 ```sh
-dsh plugin --profile web add <this-plugin>   # path / tarball / github spec
+git apply packages/client/ui-panes/patches/dsh-session-scope-and-panes-rc5.patch
+# or from this repo's patches/ directory:
+git apply dsh-session-scope-and-panes-rc5.patch
 ```
 
-The plugin refuses to install only on older dsh releases that predate the
-capability. On those, either upgrade dsh or apply the archived patch below.
+If the target checkout has drifted, apply with `--3way` for a merge, or rebase the patch manually.
 
-## Archived patch (older dsh only)
+## Verify after applying
 
-`dsh-renderer-session-scope-0809.patch` carried the same capabilities for the
-20260807 official snapshot, before they merged upstream. It is **superseded**:
-against the current snapshot the changes are already present and the patch
-will not apply. It is kept for reference; do not apply it to a current
-checkout.
+```sh
+pnpm run build:lib:client && pnpm run build:web
+pnpm exec vitest run packages/client/web-react packages/client/runtime packages/client/ui-layout packages/test-support/client-runtime
+```
 
-The patch's file-by-file account (still accurate for the merged change set):
+Boot `dsh web`, install the ui-panes plugin, and confirm split panes, header actions, and session drag & drop work.
 
-| File | Addition |
-|---|---|
-| `packages/client/web-react/src/session-provider.tsx` | `SessionScope` component (render a subtree under an EXPLICIT session's bundle), the by-id seats (`sessionByIdSeat` / `projectionByIdSeat`) backing `useSessionById` / `useProjectionById` |
-| `packages/client/web-react/src/scoped-slots.tsx` | Inject the new global seats (`useSessionById`, `useProjectionById`, `SessionScope`) into the standard kit |
-| `packages/client/web-react/src/index.ts` | Export the new seats |
-| `packages/client/ui-slots/src/index.ts` | Types: `UseSessionById`, `UseProjectionById`, `SessionScopeProps`, `SessionScopeComponent` |
-| `packages/client/ui-slots/src/renderer.ts` | `SlotRendererHost.sessions.session(id)` + `sessions.emptyInfo` members |
-| `packages/client/runtime/src/client/slots.ts` | Host face wiring for the two new sessions members |
-| `packages/client/runtime/src/client/sessions/service.ts` | `session(id)` + `emptyInfo` (the static no-session roster) |
-| `packages/client/runtime/src/client/contract/sessions.ts` | `ISessions.session(id)` + `emptyInfo` contract members |
-| `packages/client/ui-layout/src/client/AppFrame.tsx` | Render the center column through the `conversation.panes` wrapping seam (owner render-prop + stock fallback) |
-| `packages/client/ui-layout/src/client/index.ts` | `conversation.panes` slot declaration (root scope) + `ConvPanesOwnerProps` |
+## Distribution notes
 
-All changes are pure additions — the stock GUI stays byte-for-byte identical
-without the plugin.
+- The patch and the plugin travel together: distribute `@dsh-external/dsh-split-panes` plus this file (keep it in the package's `patches/` directory so it ships in the tarball — `patches` is in the package `files` list).
+- The renderer capability itself is generic (by-id session binding); it has no dependency on ui-panes and can be applied independently.
+- Once the upstream discussion lands the capability, the patch becomes a no-op (its changes will already be present).
 
-The plugin's typed seats are declared in `src/client/global-seats.ts`
-(`declare module` merge over `GlobalStandardProps`), matching the renderer's
-unconditional injection — the same consumer-typed pattern the diff-viewer
-plugin uses for its slot declarations.
+## Archived patch
+
+`dsh-renderer-session-scope-0809.patch` is the earlier capability patch against the 20260807 private snapshot. It is superseded by `dsh-session-scope-and-panes-rc5.patch` (official rc.5 baseline) and kept only as a reference — do not apply it to an rc.5 checkout.

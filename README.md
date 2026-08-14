@@ -15,14 +15,18 @@ DSH 对话分屏插件（PiUI 风格）：把信息流分成多个可独立操�
 
 ## 前置：渲染器会话绑定能力
 
-分屏的核心依赖渲染器能**按 id 绑定会话**（`SessionScope` 全局座位 + by-id 座位）。该能力（提案 [dsh-external/issues#486](https://github.com/dsh-external/issues/issues/486)）**已合入官方 DeepSeek Harness web 客户端**（当前开发快照开始）——安装插件即可，无需任何前置。
+分屏的核心依赖渲染器能**按 id 绑定会话**（`SessionScope` 全局座位 + by-id 座位）以及包裹原生会话列的 `conversation.panes` 缝。**官方 DeepSeek Harness（含当前 `0.1.0-rc.5` 发行版）尚未内置这两项能力**（提案已发官方讨论区：[deepseek-harness/discussions/604](https://github.com/deepseek-ai/deepseek-harness/discussions/604)），安装插件前需要运行环境具备它们：
 
-> 在早于该能力的 dsh 发行版上，插件无法安装：请升级 dsh，或参考 `patches/README.md` 中的存档补丁（仅针对旧快照）。
+| 方式 | 说明 |
+|---|---|
+| **官方合入后** | 纯插件安装，无需任何前置（讨论帖 604 推进中） |
+| **带能力的 DSH** | 使用已内置该能力的内测发行版 |
+| **渲染器补丁** | 对官方 `0.1.0-rc.5` 基线应用 `patches/dsh-session-scope-and-panes-rc5.patch`（约 500 行纯新增，应用方法见 [patches/README](patches/README.md)） |
 
 ## 安装
 
 ```sh
-git clone https://github.com/dsh-external/dsh-split-panes.git
+git clone https://github.com/lehhair/dsh-split-panes.git
 dsh plugin --profile web add link:/path/to/dsh-split-panes
 ```
 
@@ -38,7 +42,7 @@ dsh plugin --profile web add link:/path/to/dsh-split-panes
 ## 开发
 
 ```sh
-pnpm install        # devDeps link 到 ../dsh2026/test-lehhair（DSH 源码，需先构建其 client 包）
+pnpm install        # devDeps link 到 ../dsh2026/deepseek-harness（DSH 源码，需先构建其 client 包）
 pnpm run check      # typecheck + test + build
 ```
 
@@ -57,9 +61,11 @@ src/client/
   global-seats.ts          # GlobalStandardProps 类型合并（SessionScope/by-id 座位）
   PaneGlobal.module.css    # 插件全局 chrome（单行 header、渐变、内容留白、侧边栏融合）
 patches/
-  dsh-renderer-session-scope-0809.patch   # 存档：能力已合入官方，仅旧快照参考（见 README.md）
+  dsh-session-scope-and-panes-rc5.patch   # 核心能力补丁（官方 rc.5 基线，应用方法见 patches/README.md）
+  dsh-renderer-session-scope-0809.patch   # 存档：旧快照（20260807）参考
 ```
 
 ## License
 
 BSD-3-Clause
+
