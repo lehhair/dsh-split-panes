@@ -63,12 +63,13 @@ export interface PaneOccupant {
   readonly select?: ((owner: object) => unknown) | undefined
   readonly locale?: string | undefined
   /**
-   * Assemble this occupant's full props for one pane (kit + inject + store),
-   * then render it. `renderChild` is the pane's own dispatch for the
-   * occupant's declared children (supplied at mount so child slots resolve
-   * through the same ledger).
+   * Assemble this occupant's full props for one pane (kit + inject + store +
+   * slot-level inject + owner), then render it. `renderChild` is the pane's
+   * own dispatch for the occupant's declared children. `owner`/`slotInject`/
+   * `hookContext` are the dispatch-occurrence inputs (the caller's renderSlot
+   * arguments), merged exactly like the production outlet: owner wins.
    */
-  readonly render: (ctx: PaneMount, renderChild: PaneRenderHost) => ReactNode
+  readonly render: (ctx: PaneMount, renderChild: PaneRenderHost, owner: object, slotInject: BoundSlotInject, hookContext: unknown) => ReactNode
 }
 
 /** Reparse the record into the shape this package consumes. */
@@ -130,7 +131,11 @@ class PaneBoundary extends Component<{ fallback?: ReactNode; children?: ReactNod
 /** The pane mount context passed to every occupant render. */
 export interface PaneMount {
   readonly kit: PaneKit
-  readonly slots: { entries(key: string): readonly StoredEntry[] }
+  readonly slots: {
+    entries(key: string): readonly StoredEntry[]
+    /** Slot spec lookup (slot-level inject + scope + kind). */
+    specOf?(key: string): { kind: string; scope: string; inject?: unknown } | undefined
+  }
   /** The locale face (bind(ns) → translate); entries declaring a namespace read their `t` here. */
   readonly locale?: { bind(ns: string): (key: string, params?: Record<string, unknown>) => string } | undefined
   /** Child dispatch (assembled after the host closure completes). */
@@ -139,8 +144,51 @@ export interface PaneMount {
 
 /** Child-slot dispatch exposed to occupants (composed props renderSlot/renderSlotChain). */
 export interface PaneRenderHost {
-  renderSlot: (key: string, owner: object, opts?: { entryKey?: string; only?: string; fallback?: ReactNode }) => ReactNode
-  renderSlotChain: (key: string, owner: object, opts?: { fallback?: ReactNode }) => ReactNode
+  renderSlot: (key: string, owner: object, opts?: { entryKey?: string; only?: string; fallback?: ReactNode; hookContext?: unknown }) => ReactNode
+  renderSlotChain: (key: string, owner: object, opts?: { fallback?: ReactNode; overlay?: boolean; fallbackOnly?: boolean }) => ReactNode
+}
+
+/** One entry's slot-level inject face: fixed props + per-dispatch hook factories. */
+interface BoundSlotInject {
+  readonly props: Record<string, unknown>
+  readonly factories: Readonly<Record<string, (standard: Record<string, unknown>, hookContext: unknown) => unknown>> | undefined
+}
+
+const EMPTY_SLOT_INJECT: BoundSlotInject = { props: {}, factories: undefined }
+
+const slotInjectCache = new WeakMap<object, BoundSlotInject>()
+
+/**
+ * Normalize one slot-level inject face (the declaring slot's `inject` member,
+ * carried on the slot SPEC — not the entry): `hooks` members that are
+ * functions are factories bound per dispatch occurrence with the occurrence's
+ * hookContext; every other member passes through as a fixed prop.
+ */
+function cachedSlotInject(face: object | undefined): BoundSlotInject {
+  if (face === undefined) return EMPTY_SLOT_INJECT
+  let bound = slotInjectCache.get(face)
+  if (bound !== undefined) return bound
+  const definitions = (face as Record<string, unknown>)['hooks']
+  if (definitions === undefined || typeof definitions !== 'object') {
+    bound = { props: face as Record<string, unknown>, factories: undefined }
+    slotInjectCache.set(face, bound)
+    return bound
+  }
+  const { hooks: _hooks, ...rest } = face as Record<string, unknown>
+  const props: Record<string, unknown> = rest
+  let factories: Record<string, (standard: Record<string, unknown>, hookContext: unknown) => unknown> | undefined
+  for (const [name, definition] of Object.entries(definitions as Record<string, unknown>)) {
+    const hookName = standardHookPropName(name)
+    if (typeof definition === 'function') {
+      factories ??= {}
+      factories[name] = definition as (standard: Record<string, unknown>, hookContext: unknown) => unknown
+    } else {
+      props[hookName] = definition
+    }
+  }
+  bound = { props, factories }
+  slotInjectCache.set(face, bound)
+  return bound
 }
 
 const NO_RECORDS: readonly StoredEntry[] = Object.freeze([])
@@ -154,7 +202,7 @@ export function resolveOccupant(raw: StoredEntry): PaneOccupant | undefined {
   const component = record.component
   if (typeof component !== 'function') return undefined
   const store = record.store
-  const render: PaneOccupant['render'] = (ctx, renderChild) => {
+  const render: PaneOccupant['render'] = (ctx, renderChild, owner, slotInject, hookContext) => {
     const sessionId = ctx.kit.sessionId as string | undefined
     // 1. standard kit props (plain props first; synthesized hooks override).
     const props: Record<string, unknown> = { ...ctx.kit.props }
@@ -176,18 +224,37 @@ export function resolveOccupant(raw: StoredEntry): PaneOccupant | undefined {
       })
       props['actions'] = instance.actions
     }
-    // 4. global standard seats + child dispatch.
+    // 4. global standard seats + child dispatch. Absent binding hooks
+    // (explicit undefined) are skipped — a session-maybe occupant renders
+    // its absent branch on the missing seat instead of crashing on an
+    // undefined function.
     props['sessionId'] = sessionId
     props['useSession'] = ctx.kit.useSession
     props['useSessions'] = ctx.kit.useSessions
     props['useProjection'] = ctx.kit.useProjection
-    for (const [name, hook] of Object.entries(ctx.kit.hooks)) props[name.startsWith('use') ? name : standardHookPropName(name)] = hook
+    for (const [name, hook] of Object.entries(ctx.kit.hooks)) {
+      if (hook === undefined) continue
+      props[name.startsWith('use') ? name : standardHookPropName(name)] = hook
+    }
     // 5. the locale `t` seat for entries that declare a namespace (the
     // renderer synthesizes it from the installed locale face; the bind is
     // identity-stable per namespace).
     if (record.locale !== undefined && ctx.locale !== undefined) {
       props['t'] = ctx.locale.bind(record.locale)
     }
+    // 6. slot-level inject: fixed props, then the hook factories bound to
+    // THIS dispatch occurrence's hookContext (the chat node's useTurnData
+    // rides here).
+    Object.assign(props, slotInject.props)
+    if (slotInject.factories !== undefined) {
+      for (const [name, factory] of Object.entries(slotInject.factories)) {
+        const hook = factory(props as Record<string, unknown>, hookContext)
+        props[standardHookPropName(name)] = hook
+      }
+    }
+    // 7. owner props LAST — they win (the production outlet's merge order:
+    // kit, inject, slot inject, contextual hooks, owner).
+    Object.assign(props, owner)
     props['renderSlot'] = renderChild.renderSlot
     props['renderSlotChain'] = renderChild.renderSlotChain
     return (
@@ -214,7 +281,7 @@ export function resolveOccupant(raw: StoredEntry): PaneOccupant | undefined {
  * appear as they land.
  */
 export function createPaneRenderHost(
-  slots: { entries(key: string): readonly StoredEntry[] },
+  slots: PaneMount['slots'],
   kit: PaneKit,
   locale?: { bind(ns: string): (key: string, params?: Record<string, unknown>) => string },
 ): PaneRenderHost & { occupants(key: string): readonly PaneOccupant[] } {
@@ -239,6 +306,19 @@ export function createPaneRenderHost(
   }
 
   let renderChild: PaneRenderHost
+  const dispatch = (key: string, occupant: PaneOccupant, owner: object, opts?: { hookContext?: unknown; fallback?: ReactNode }): ReactNode => {
+    // The slot-level inject face rides the slot SPEC (declared by the
+    // entry that owns the children table). SlotRegistry exposes `spec()`;
+    // the record view exposes the spec through whatever face the caller
+    // supplied (specOf on the mount, or a registry's spec method).
+    const spec = slots.specOf?.(key) ?? (slots as { spec?(key: string): { kind: string; scope: string; inject?: unknown } | undefined }).spec?.(key)
+    const slotInject = cachedSlotInject(spec?.inject as object | undefined)
+    return (
+      <PaneBoundary fallback={opts?.fallback}>
+        {occupant.render(mount, renderChild, owner, slotInject, opts?.hookContext)}
+      </PaneBoundary>
+    )
+  }
   renderChild = {
     renderSlot: (key, owner, opts) => {
       const list = occupants(key)
@@ -246,18 +326,19 @@ export function createPaneRenderHost(
         const found = list.find(o => o.key === opts.entryKey)
         return found === undefined
           ? (opts.fallback ?? null)
-          : found.render(mount, renderChild)
+          : dispatch(key, found, owner, opts)
       }
       if (opts?.only !== undefined) {
         const found = list.find(o => o.id === opts.only)
         return found === undefined
           ? (opts.fallback ?? null)
-          : found.render(mount, renderChild)
+          : dispatch(key, found, owner, opts)
       }
       const first = list[0]
-      return first === undefined ? (opts?.fallback ?? null) : first.render(mount, renderChild)
+      return first === undefined ? (opts?.fallback ?? null) : dispatch(key, first, owner, opts)
     },
     renderSlotChain: (key, owner, opts) => {
+      if (opts?.fallbackOnly === true) return opts.fallback ?? null
       for (const occupant of occupants(key)) {
         const select = occupant.select
         if (select === undefined) continue
@@ -268,12 +349,10 @@ export function createPaneRenderHost(
           continue
         }
         if (matched === null || matched === undefined) continue
-        // Chain occupants render with `matched` merged into owner props.
-        return (
-          <PaneBoundary fallback={opts?.fallback}>
-            {occupant.render(mount, renderChild)}
-          </PaneBoundary>
-        )
+        // The chain entry renders with `matched` merged into the owner (the
+        // component reads it as the `matched` prop) — owner wins on conflicts
+        // except matched itself.
+        return dispatch(key, occupant, { ...owner, matched }, opts)
       }
       return opts?.fallback ?? null
     },

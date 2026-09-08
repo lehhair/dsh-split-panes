@@ -30,13 +30,22 @@ export const PaneBody = memo(function PaneBody(props: {
   const kit = buildPaneKit(ctx, sessionId as never)
   const host = createPaneRenderHost(ctx.slots, kit, ctx.locale)
 
-  // The header (crumb/tabs/actions) — the pane's own tab strip. Renders
-  // null when the session is blank (the stock header hides itself).
-  const header = host.renderSlot('conversation.session.header', {}, { fallback: null })
-  // The active view body (chat / trajectory …).
-  const body = host.renderSlot('conversation.session', {}, { fallback: null })
+  // The strict session slots (header, body, input docks) are gated on the
+  // session identity exactly like ui-conversation's ConversationRoot: they
+  // are declared session scope, and dispatching them without a binding
+  // would hand the occupant an absent session kit (every session hook
+  // undefined). The composer bar is a session-maybe slot — it renders
+  // (inert) without a session, as the stock shell does.
+  const header = sessionId === undefined
+    ? null
+    : host.renderSlot('conversation.session.header', {}, { fallback: null })
+  const body = sessionId === undefined
+    ? null
+    : host.renderSlot('conversation.session', {}, { fallback: null })
   // Composer: the stock composer bar card + the input dock strips above it.
-  const dockEntries = host.renderSlot('conversation.input.dock', {}, { fallback: null })
+  const dockEntries = sessionId === undefined
+    ? null
+    : host.renderSlot('conversation.input.dock', {}, { fallback: null })
   const composer = host.renderSlot('conversation.composer.bar', {
     variant: 'composer',
   }, { fallback: null })
