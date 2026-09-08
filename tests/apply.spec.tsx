@@ -63,7 +63,7 @@ async function bench() {
 
 describe('ui-panes apply', () => {
   it('declares only the services it uses', () => {
-    expect(inject).toEqual(['slots', 'locale', 'sessions', 'uiSession'])
+    expect(inject).toEqual(['slots', 'locale', 'sessions', 'uiSession', 'workspaces'])
   })
 
   it('registers the workspace takeover and the header split/close buttons', async () => {

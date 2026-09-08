@@ -67,7 +67,7 @@ const NS = 'panes'
 const TAKEOVER_PRIORITY = -1
 
 /** Services required by the panes plugin. */
-export const inject = ['slots', 'locale', 'sessions', 'uiSession']
+export const inject = ['slots', 'locale', 'sessions', 'uiSession', 'workspaces']
 
 /**
  * Register the panes-plugin surfaces over ONE shared pane-layout store
@@ -173,24 +173,28 @@ export function apply(ctx: ClientContext): void {
 
   // Header split/close buttons: registered into the session-scoped header
   // actions row (declared by ui-conversation), operating the SAME shared
-  // pane tree through the closure captured above. No store seat.
+  // pane tree through the closure captured above. No store seat. Each entry
+  // declares the panes locale namespace so the renderer synthesizes its `t`.
   ctx.slots.inject('conversation.session.header.actions' as never, function* () {
     yield ctx.slots.register({
       name: 'conversation.session.header.actions',
       id: 'panes-split',
       order: 1000,
+      locale: NS,
       inject: (): PaneWorkspaceInjected => operations,
     } as never, SplitPaneButton as never)
     yield ctx.slots.register({
       name: 'conversation.session.header.actions',
       id: 'panes-split-v',
       order: 1001,
+      locale: NS,
       inject: (): PaneWorkspaceInjected => operations,
     } as never, SplitVerticalButton as never)
     yield ctx.slots.register({
       name: 'conversation.session.header.actions',
       id: 'panes-close',
       order: 1002,
+      locale: NS,
       inject: (): Pick<PaneWorkspaceInjected, 'closeFocused' | 'hasSplit'> => ({
         closeFocused,
         hasSplit,

@@ -180,7 +180,15 @@ export function buildPaneKit(
   // ui-session / the workspace owner install through slots.provideRoot.
   hooks['sessions'] = bindSelector(ctx.sessions.list)
   hooks['sessionPendingInteraction'] = bindSelector(ctx.uiSession.pendingInteractions)
-  if (ctx.workspaces?.list !== undefined) hooks['workspaces'] = bindSelector(ctx.workspaces.list)
+  // cordis getters throw on un-injected services (even through optional
+  // chaining), so the optional workspaces feed is read through a guard.
+  let workspaces: { readonly list?: HostObservable<unknown> } | undefined
+  try {
+    workspaces = ctx.workspaces as { readonly list?: HostObservable<unknown> } | undefined
+  } catch {
+    workspaces = undefined
+  }
+  if (workspaces?.list !== undefined) hooks['workspaces'] = bindSelector(workspaces.list)
 
   if (binding !== undefined) {
     // Same precedence the renderer uses: plain props spread first, then the
