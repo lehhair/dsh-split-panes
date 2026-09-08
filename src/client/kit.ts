@@ -231,12 +231,24 @@ export function buildPaneKit(
     if (hooks[name] === undefined) hooks[name] = absentHook()
   }
 
+  // The keyed projection hook mirrors the renderer's keyedObservableHook
+  // absent arm: it must ALWAYS run useSyncExternalStore (over the absent
+  // source), never a selector-only shortcut. Occupants whose component
+  // instance survives the hero/active transition (composer.bar's InputBar is
+  // session-maybe) call it unconditionally — a fallback that skipped the uSES
+  // call would change the component's hook count across the transition and
+  // corrupt React's hook chain ("Cannot read properties of null (reading
+  // 'destroy')").
+  const absentKeyed = (<S,>(key: string, selector?: (snapshot: unknown) => S, equal?: (left: S, right: S) => boolean): S => {
+    const useValue = bindSelector(ABSENT_SOURCE)
+    return useValue(((value) => (selector ?? identity)(value)) as (snapshot: unknown) => S, equal)
+  }) as KeyedSelectorHook<unknown>
+
   return {
     sessionId,
     useSession: hooks['session'] ?? absentHook(),
     useSessions: hooks['sessions'] ?? absentHook(),
-    useProjection: (keyedHooks['projection']
-      ?? (<S,>(key: string, selector?: (snapshot: unknown) => S): S => (selector ?? (identity as (value: unknown) => S))(undefined))) as KeyedSelectorHook<unknown>,
+    useProjection: keyedHooks['projection'] ?? absentKeyed,
     hooks,
     keyedHooks,
     props,

@@ -41,10 +41,6 @@ import { SplitVerticalButton } from './SplitVerticalButton.tsx'
 import { ClosePaneButton } from './ClosePaneButton.tsx'
 import { createPaneLayoutStore, allLeaves, type PaneLayoutState } from './pane-layout-store.ts'
 import { en, zh, type PaneKey } from './locales.ts'
-// Plugin-owned global chrome (single-row header, sidebar fusion): injected
-// with this bundle, removed on unload — the stock GUI stays unchanged
-// without the plugin row.
-import './PaneGlobal.module.css'
 
 export type { PaneWorkspaceProps, PaneWorkspaceInjected } from './PaneWorkspace.tsx'
 export type { SplitPaneButtonProps } from './SplitPaneButton.tsx'
