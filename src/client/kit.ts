@@ -27,10 +27,15 @@ export type SelectorHook<Snapshot> = <S>(
   equal?: (left: S, right: S) => boolean,
 ) => S
 
-/** Keyed selector hook: one stable source resolver per key, selector over its value. */
+/**
+ * Keyed selector hook: one stable source resolver per key, selector over its
+ * value. The selector is OPTIONAL (the core's KeyedSnapshotSelectorHook
+ * contract — `useProjection('key')` without a selector reads the whole
+ * snapshot, exactly as `TodoDock` consumes it).
+ */
 export type KeyedSelectorHook<Snapshot> = <S>(
   key: string,
-  selector: (snapshot: Snapshot | undefined) => S,
+  selector?: (snapshot: Snapshot | undefined) => S,
   equal?: (left: S, right: S) => boolean,
 ) => S
 
@@ -57,6 +62,9 @@ export function bindSelector<Snapshot>(source: HostObservable<Snapshot>): Select
     return selector(useSyncExternalStore(subscribe, getSnapshot, getSnapshot) as Snapshot)
   }
 }
+
+/** The identity selector (the keyed hook's no-selector default). */
+const identity = (value: unknown): unknown => value
 
 /** Identity-stable hook over an ABSENT source: selector never runs, returns undefined. */
 const ABSENT_SOURCE: HostObservable<undefined> = {
@@ -94,10 +102,16 @@ export interface PaneUiSession {
     readonly current: HostObservable<{ key: string | undefined }>
     resolve(key: string): ScopedStandardSourceBinding | undefined
   }
+  /** Root source of pending UI interactions (the useSessionPendingInteraction feed). */
+  readonly pendingInteractions: HostObservable<unknown>
 }
 
 /** Type of ctx.uiSession as merged by @deepseek-ai/dsh-client-ui-session/client. */
-export type PaneContext = Context & { readonly uiSession: PaneUiSession }
+export type PaneContext = Context & {
+  readonly uiSession: PaneUiSession
+  /** The locale face as merged by @deepseek-ai/dsh-client-locale/client. */
+  readonly locale?: { bind(ns: string): (key: string, params?: Record<string, unknown>) => string } | undefined
+}
 
 function absentHook<Snapshot>(): SelectorHook<Snapshot> {
   const useAbsent = bindSelector(ABSENT_SOURCE)
@@ -146,7 +160,10 @@ export function ensurePaneSessionOpen(
  * @returns the pane kit.
  */
 export function buildPaneKit(
-  ctx: PaneContext & { readonly sessions: { sessionOf(scope: ScopedStandardSourceBinding['ctx']): unknown } },
+  ctx: PaneContext & {
+    readonly sessions: { sessionOf(scope: ScopedStandardSourceBinding['ctx']): unknown; readonly list: HostObservable<unknown> }
+    readonly workspaces?: { readonly list: HostObservable<unknown> } | undefined
+  },
   sessionId: SessionId | undefined,
 ): PaneKit {
   const binding = sessionId === undefined ? undefined : ctx.uiSession.adapter.resolve(sessionId as string)
@@ -154,6 +171,16 @@ export function buildPaneKit(
   const hooks: Record<string, SelectorHook<unknown> | undefined> = {}
   const keyedHooks: Record<string, KeyedSelectorHook<unknown> | undefined> = {}
   const props: Record<string, unknown> = {}
+
+  // ROOT standard sources first (the renderer's standardProps synthesis:
+  // `{...root, ...session}` — the session binding's hooks overwrite). The
+  // root binding lives inside the renderer host, but its contributions are
+  // the services themselves: useSessions reads the sessions list feed and
+  // useWorkspaces the workspaces list (both bare observables), exactly what
+  // ui-session / the workspace owner install through slots.provideRoot.
+  hooks['sessions'] = bindSelector(ctx.sessions.list)
+  hooks['sessionPendingInteraction'] = bindSelector(ctx.uiSession.pendingInteractions)
+  if (ctx.workspaces?.list !== undefined) hooks['workspaces'] = bindSelector(ctx.workspaces.list)
 
   if (binding !== undefined) {
     // Same precedence the renderer uses: plain props spread first, then the
@@ -165,9 +192,9 @@ export function buildPaneKit(
     for (const [name, source] of Object.entries(binding.keyedHooks)) {
       keyedHooks[name] = source === undefined
         ? undefined
-        : ((key, selector, equal) => {
+        : (<S>(key: string, selector?: (snapshot: unknown) => S, equal?: (left: S, right: S) => boolean): S => {
           const useValue = bindSelector(source(key) ?? ABSENT_SOURCE)
-          return useValue(value => selector(value), equal)
+          return useValue(((value) => (selector ?? identity)(value)) as (snapshot: unknown) => S, equal)
         })
     }
   }
@@ -176,8 +203,8 @@ export function buildPaneKit(
     sessionId,
     useSession: hooks['session'] ?? absentHook(),
     useSessions: hooks['sessions'] ?? absentHook(),
-    useProjection: keyedHooks['projection']
-      ?? ((_key, selector) => selector(undefined)),
+    useProjection: (keyedHooks['projection']
+      ?? (<S,>(key: string, selector?: (snapshot: unknown) => S): S => (selector ?? (identity as (value: unknown) => S))(undefined))) as KeyedSelectorHook<unknown>,
     hooks,
     keyedHooks,
     props,

@@ -28,7 +28,7 @@ export const PaneBody = memo(function PaneBody(props: {
 }): ReactNode {
   const { ctx, sessionId } = props
   const kit = buildPaneKit(ctx, sessionId as never)
-  const host = createPaneRenderHost(ctx.slots, kit)
+  const host = createPaneRenderHost(ctx.slots, kit, ctx.locale)
 
   // The header (crumb/tabs/actions) — the pane's own tab strip. Renders
   // null when the session is blank (the stock header hides itself).

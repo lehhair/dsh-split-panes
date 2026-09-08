@@ -93,15 +93,24 @@ function bindInjectSources(face: Record<string, unknown>): Record<string, unknow
   if (keyed !== null && typeof keyed === 'object') {
     for (const [name, source] of Object.entries(keyed as Record<string, (key: string) => { getSnapshot(): unknown; subscribe(fn: () => void): () => void } | undefined>)) {
       if (source === undefined) continue
-      const hook: KeyedSelectorHook<unknown> = (key, selector, equal) => {
+      // The selector is optional (the core's keyed-hook contract: no selector
+      // reads the whole snapshot).
+      const hook: KeyedSelectorHook<unknown> = (<S,>(
+        key: string,
+        selector?: (snapshot: unknown) => S,
+        equal?: (left: S, right: S) => boolean,
+      ): S => {
         const useValue = bindSelector(source(key) ?? { getSnapshot: () => undefined, subscribe: () => () => {} })
-        return useValue(value => selector(value), equal)
-      }
+        return useValue(((value) => (selector ?? identityOf)(value)) as (snapshot: unknown) => S, equal)
+      })
       out[standardHookPropName(name)] = hook
     }
   }
   return out
 }
+
+/** The identity selector (the keyed hook's no-selector default). */
+const identityOf = (value: unknown): unknown => value
 
 /** Error boundary so one pane's native occupant cannot take down the workspace. */
 class PaneBoundary extends Component<{ fallback?: ReactNode; children?: ReactNode }, { failed: boolean }> {
@@ -122,6 +131,8 @@ class PaneBoundary extends Component<{ fallback?: ReactNode; children?: ReactNod
 export interface PaneMount {
   readonly kit: PaneKit
   readonly slots: { entries(key: string): readonly StoredEntry[] }
+  /** The locale face (bind(ns) → translate); entries declaring a namespace read their `t` here. */
+  readonly locale?: { bind(ns: string): (key: string, params?: Record<string, unknown>) => string } | undefined
   /** Child dispatch (assembled after the host closure completes). */
   renderChild: PaneRenderHost
 }
@@ -171,6 +182,12 @@ export function resolveOccupant(raw: StoredEntry): PaneOccupant | undefined {
     props['useSessions'] = ctx.kit.useSessions
     props['useProjection'] = ctx.kit.useProjection
     for (const [name, hook] of Object.entries(ctx.kit.hooks)) props[name.startsWith('use') ? name : standardHookPropName(name)] = hook
+    // 5. the locale `t` seat for entries that declare a namespace (the
+    // renderer synthesizes it from the installed locale face; the bind is
+    // identity-stable per namespace).
+    if (record.locale !== undefined && ctx.locale !== undefined) {
+      props['t'] = ctx.locale.bind(record.locale)
+    }
     props['renderSlot'] = renderChild.renderSlot
     props['renderSlotChain'] = renderChild.renderSlotChain
     return (
@@ -199,6 +216,7 @@ export function resolveOccupant(raw: StoredEntry): PaneOccupant | undefined {
 export function createPaneRenderHost(
   slots: { entries(key: string): readonly StoredEntry[] },
   kit: PaneKit,
+  locale?: { bind(ns: string): (key: string, params?: Record<string, unknown>) => string },
 ): PaneRenderHost & { occupants(key: string): readonly PaneOccupant[] } {
   const cache = new Map<string, readonly PaneOccupant[]>()
 
@@ -216,6 +234,7 @@ export function createPaneRenderHost(
   const mount: PaneMount = {
     kit,
     slots,
+    ...(locale !== undefined ? { locale } : {}),
     renderChild: undefined as unknown as PaneRenderHost,
   }
 

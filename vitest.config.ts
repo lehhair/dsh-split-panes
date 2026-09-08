@@ -16,6 +16,11 @@ export default defineConfig({
   },
   resolve: {
     tsconfigPaths: true,
+    // Single react across the plugin tree and the linked core sources: the
+    // core packages' symlinked react would otherwise resolve to a SECOND
+    // module instance (hooks dispatcher null — "Cannot read properties of
+    // null (reading 'useEffect')").
+    dedupe: ['react', 'react-dom', 'react/jsx-runtime'],
     alias: {
       // Symmetric with tsconfig.json paths (Vite reads the project tsconfig,
       // but keep the explicit form as the authoritative source).
