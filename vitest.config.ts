@@ -1,11 +1,12 @@
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 
-/** DSH fork sources: the plugin builds on the fork's renderer capability
-    types, and the linked packages' `./client` exports point at browser
-    bundles (lib/client.js, loader-bannered) — tests must resolve to the
-    fork's src instead, like the monorepo's tsconfig paths. */
-const fork = fileURLToPath(new URL('../dsh2026/deepseek-harness/packages/client', import.meta.url))
+/** DSH workspace sources: the linked packages' `./client` exports point at
+    browser bundles (lib/client.js, loader-bannered) — tests must resolve to
+    the workspace src instead (see tsconfig.json `paths`, which maps every
+    @deepseek-ai dependency to the core checkout's sources). Vite resolves
+    tsconfig paths natively (resolve.tsconfigPaths). */
+const core = fileURLToPath(new URL('../dsh2026/deepseek-harness', import.meta.url))
 
 export default defineConfig({
   test: {
@@ -14,17 +15,23 @@ export default defineConfig({
     pool: 'threads',
   },
   resolve: {
+    tsconfigPaths: true,
     alias: {
-      '@deepseek-ai/dsh-client-runtime/client': `${fork}/runtime/src/client/index.ts`,
-      '@deepseek-ai/dsh-client-runtime': `${fork}/runtime/src/index.ts`,
-      '@deepseek-ai/dsh-client-ui-slots': `${fork}/ui-slots/src/index.ts`,
-      '@deepseek-ai/dsh-client-ui-layout/client': `${fork}/ui-layout/src/client/index.ts`,
-      '@deepseek-ai/dsh-client-ui-primitives': `${fork}/ui-primitives/src/index.ts`,
-      '@deepseek-ai/dsh-client-locale/client': `${fork}/locale/src/client/index.ts`,
-      '@deepseek-ai/dsh-client-test-runtime': `${fork}/../test-support/client-runtime/src/index.ts`,
-      '@deepseek-ai/dsh-client-test-runtime/client': `${fork}/../test-support/client-runtime/src/client/index.ts`,
+      // Symmetric with tsconfig.json paths (Vite reads the project tsconfig,
+      // but keep the explicit form as the authoritative source).
+      '@deepseek-ai/cordis': `${core}/vendor/cordis/src`,
+      '@deepseek-ai/dsh-client-store': `${core}/packages/client/store/src/index.ts`,
+      '@deepseek-ai/dsh-client-ui-slots': `${core}/packages/client/ui-slots/src/index.ts`,
+      '@deepseek-ai/dsh-client-ui-primitives': `${core}/packages/client/ui-primitives/src/index.ts`,
+      '@deepseek-ai/dsh-client-locale/client': `${core}/packages/client/locale/src/client/index.ts`,
+      '@deepseek-ai/dsh-client-ui-layout/client': `${core}/packages/client/ui-layout/src/client/index.ts`,
+      '@deepseek-ai/dsh-client-ui-renderer/client': `${core}/packages/client/ui-renderer/src/client/index.ts`,
+      '@deepseek-ai/dsh-client-ui-session/client': `${core}/packages/client/ui-session/src/client/index.ts`,
+      '@deepseek-ai/dsh-client-ui-conversation/client': `${core}/packages/client/ui-conversation/src/client/index.ts`,
+      '@deepseek-ai/dsh-api-session-controller/client': `${core}/packages/api/session-controller/src/client/index.ts`,
+      '@deepseek-ai/dsh-session/types': `${core}/packages/core/session/src/types.ts`,
+      '@deepseek-ai/dsh-client-test-runtime': `${core}/packages/test-support/client-runtime/src/index.ts`,
+      '@deepseek-ai/dsh-client-test-runtime/client': `${core}/packages/test-support/client-runtime/src/client/index.ts`,
     },
   },
 })
-
-

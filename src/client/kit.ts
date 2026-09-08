@@ -1,0 +1,185 @@
+/**
+ * Pane standard kit: the per-session render props a re-hosted native slot
+ * occupant receives inside one pane.
+ *
+ * The framework renders session-scoped slots by resolving the CURRENT
+ * selection's standard-source binding (ui-session's scope adapter) and
+ * synthesizing `use<Name>` selector hooks over its bare observables. The
+ * panes plugin needs the SAME kit for an EXPLICIT pane session — a by-id
+ * twin the framework does not hand out to slot components. The core DOES
+ * expose the resolution machinery, though: `ctx.uiSession.adapter.resolve(
+ * sessionId)` materializes the exact `ScopedStandardSourceBinding` the
+ * renderer consumes (hooks / keyedHooks / props / ctx — see ui-session's
+ * UiSession.materialize). This package binds its own selector hooks over
+ * that binding's bare observables (the same uSES contract the renderer's
+ * bind.ts implements — one tiny local bridge, no core internals imported),
+ * so every re-hosted native component gets identity-stable hooks that
+ * follow its pane session — no core changes.
+ */
+import { useSyncExternalStore } from 'react'
+import type { Context } from '@deepseek-ai/cordis'
+import type { HostObservable, ScopedStandardSourceBinding } from '@deepseek-ai/dsh-client-ui-slots'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+
+/** Selector hook over one snapshot source (the uSES shape components consume). */
+export type SelectorHook<Snapshot> = <S>(
+  selector: (snapshot: Snapshot) => S,
+  equal?: (left: S, right: S) => boolean,
+) => S
+
+/** Keyed selector hook: one stable source resolver per key, selector over its value. */
+export type KeyedSelectorHook<Snapshot> = <S>(
+  key: string,
+  selector: (snapshot: Snapshot | undefined) => S,
+  equal?: (left: S, right: S) => boolean,
+) => S
+
+/**
+ * Bind one bare observable source to a typed uSES selector hook.
+ *
+ * The production renderer uses the selector form of
+ * use-sync-external-store (its bind.ts — `useSyncExternalStoreWithSelector`).
+ * This package implements the same contract self-contained: the hook reads
+ * the live snapshot through uSES (subscription identity stable per source,
+ * so components never resubscribe across renders) and applies the selector
+ * in the render body. The returned value therefore re-renders on every
+ * source bump — a guard `equal` lets the caller skip value-identity churn,
+ * and the shallow overall is what the engine stores already coalesce. This
+ * is the same observable-side contract the renderer's own hooks honor for
+ * selector families without the selector form.
+ * @param source - bare observable source (engine store, session object, …).
+ * @returns the selector hook.
+ */
+export function bindSelector<Snapshot>(source: HostObservable<Snapshot>): SelectorHook<Snapshot> {
+  const subscribe = (fn: () => void) => source.subscribe(fn)
+  const getSnapshot = () => source.getSnapshot()
+  return function useSelect<S>(selector: (snapshot: Snapshot) => S, equal?: (a: S, b: S) => boolean): S {
+    return selector(useSyncExternalStore(subscribe, getSnapshot, getSnapshot) as Snapshot)
+  }
+}
+
+/** Identity-stable hook over an ABSENT source: selector never runs, returns undefined. */
+const ABSENT_SOURCE: HostObservable<undefined> = {
+  getSnapshot: () => undefined,
+  subscribe: () => () => {},
+}
+
+/**
+ * The per-pane standard kit: exactly the props the renderer's kit synthesis
+ * would hand a session-scoped slot component, assembled from ONE pane
+ * session's materialized binding. Components re-hosted inside the pane — the
+ * stock ChatView, InputBar, session header — consume these the same way they
+ * consume the framework's own kit.
+ */
+export interface PaneKit {
+  /** The pane session identity. */
+  readonly sessionId: SessionId | undefined
+  /** useSession — lifecycle snapshot selector over the pane session. */
+  readonly useSession: SelectorHook<unknown>
+  /** useSessions — the global list/current feed. */
+  readonly useSessions: SelectorHook<unknown>
+  /** useProjection — key-addressed projection values for the pane session. */
+  readonly useProjection: KeyedSelectorHook<unknown>
+  /** Every other bound standard hook by source name (conversation, input, notices, …). */
+  readonly hooks: Readonly<Record<string, SelectorHook<unknown> | undefined>>
+  /** Every keyed hook family (chatNode, chatNodeProcess, …). */
+  readonly keyedHooks: Readonly<Record<string, KeyedSelectorHook<unknown> | undefined>>
+  /** Plain standard props (inputActions, …). */
+  readonly props: Readonly<Record<string, unknown>>
+}
+
+/** The ui-session service face this package composes against (type-only; merged via import). */
+export interface PaneUiSession {
+  readonly adapter: {
+    readonly current: HostObservable<{ key: string | undefined }>
+    resolve(key: string): ScopedStandardSourceBinding | undefined
+  }
+}
+
+/** Type of ctx.uiSession as merged by @deepseek-ai/dsh-client-ui-session/client. */
+export type PaneContext = Context & { readonly uiSession: PaneUiSession }
+
+function absentHook<Snapshot>(): SelectorHook<Snapshot> {
+  const useAbsent = bindSelector(ABSENT_SOURCE)
+  return (selector) => useAbsent((_value: undefined) => selector(undefined as unknown as Snapshot))
+}
+
+/**
+ * Ensure a pane session's history window is open. Non-current sessions are
+ * NOT staged by the framework (staging follows `list.current` — see the
+ * session-controller's followCurrent), so a pane rendering an explicit
+ * session must open it itself. `Session.open()` is idempotent and
+ * independent of the stage, so calling it on a never-opened session pulls
+ * the tail window and live event stream without touching the current
+ * selection; already-open sessions no-op.
+ *
+ * The session face is resolved through the binding's scoped context via the
+ * sessions service (`sessionOf(ctx)`) — the same scope-addressed resolution
+ * the framework's own apply paths use — and its concrete open() reached
+ * through a narrow cast (the public SessionFace deliberately withholds the
+ * staging bridge).
+ *
+ * @param sessions - the sessions service face (ctx.sessions).
+ * @param binding - the pane session's resolved scope binding.
+ */
+export function ensurePaneSessionOpen(
+  sessions: { sessionOf(ctx: ScopedStandardSourceBinding['ctx']): unknown } | undefined,
+  binding: ScopedStandardSourceBinding | undefined,
+): void {
+  if (sessions === undefined || binding === undefined) return
+  const session = sessions.sessionOf(binding.ctx) as
+    | { open?: (() => Promise<void>) | undefined }
+    | undefined
+  if (session?.open !== undefined) void session.open()
+}
+
+/**
+ * Resolve (and lazily cache) one session's materialized standard-source
+ * binding, then materialize the pane kit. Bindings are identity-stable for
+ * the session's lifetime (ui-session caches materialized bindings), so the
+ * generated hooks are stable too — re-hosted components never resubscribe on
+ * unrelated re-renders.
+ *
+ * @param ctx - client root context carrying ctx.uiSession.
+ * @param sessionId - pane session id; undefined renders the absent kit
+ *   (new-conversation hero: no session hooks, only the global feeds).
+ * @returns the pane kit.
+ */
+export function buildPaneKit(
+  ctx: PaneContext & { readonly sessions: { sessionOf(scope: ScopedStandardSourceBinding['ctx']): unknown } },
+  sessionId: SessionId | undefined,
+): PaneKit {
+  const binding = sessionId === undefined ? undefined : ctx.uiSession.adapter.resolve(sessionId as string)
+  ensurePaneSessionOpen(ctx.sessions, binding)
+  const hooks: Record<string, SelectorHook<unknown> | undefined> = {}
+  const keyedHooks: Record<string, KeyedSelectorHook<unknown> | undefined> = {}
+  const props: Record<string, unknown> = {}
+
+  if (binding !== undefined) {
+    // Same precedence the renderer uses: plain props spread first, then the
+    // synthesized hook props overwrite.
+    for (const [name, value] of Object.entries(binding.props)) props[name] = value
+    for (const [name, source] of Object.entries(binding.hooks)) {
+      hooks[name] = source === undefined ? undefined : bindSelector(source)
+    }
+    for (const [name, source] of Object.entries(binding.keyedHooks)) {
+      keyedHooks[name] = source === undefined
+        ? undefined
+        : ((key, selector, equal) => {
+          const useValue = bindSelector(source(key) ?? ABSENT_SOURCE)
+          return useValue(value => selector(value), equal)
+        })
+    }
+  }
+
+  return {
+    sessionId,
+    useSession: hooks['session'] ?? absentHook(),
+    useSessions: hooks['sessions'] ?? absentHook(),
+    useProjection: keyedHooks['projection']
+      ?? ((_key, selector) => selector(undefined)),
+    hooks,
+    keyedHooks,
+    props,
+  }
+}

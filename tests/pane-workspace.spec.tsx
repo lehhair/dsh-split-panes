@@ -1,20 +1,20 @@
 // @vitest-environment jsdom
-/* PaneWorkspace (ROOT scope): single full-bleed pane renders the
-   owner-provided feed with no chrome; the no-session hero stays full-bleed;
-   splitting clones the pane — the original keeps the current session, the
-   new pane is the new-conversation entry — and EVERY pane renders the full
-   conversation (its own stock header included) scoped to its OWN session
-   via the SessionScope seat, inside a focus-grabbing frame; a selection
-   change routes to the FOCUSED pane; focusing a pane opens its session;
-   mod+shift keybindings split and close; dragging a side-bar session onto a
-   pane highlights the drop zone and splits to that side (or replaces the
-   pane's session on the center). */
+/* PaneWorkspace (the plugin's conversation-slot replacement): single
+   full-bleed pane renders the inject-provided feed with no chrome; the
+   no-session hero stays full-bleed; splitting clones the pane — the
+   original keeps the current session, the new pane is the new-conversation
+   entry — and EVERY pane re-hosts its conversation through the injected
+   renderPane delegate (session-id addressed), inside a focus-grabbing
+   frame; a selection change routes to the FOCUSED pane; focusing a pane
+   opens its session; mod+shift keybindings split and close; dragging a
+   side-bar session onto a pane highlights the drop zone and splits to that
+   side (or replaces the pane's session on the center). */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, createEvent, fireEvent, render, screen, act } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import type { PaneWorkspaceProps } from '../src/client/PaneWorkspace.tsx'
 import { PaneWorkspace, SESSION_DRAG_TYPE } from '../src/client/PaneWorkspace.tsx'
-import { createPaneLayoutStore } from '../src/client/pane-layout-store.ts'
+import { createPaneLayoutStore, allLeaves, type PaneLayoutState } from '../src/client/pane-layout-store.ts'
 import { en } from '../src/client/locales.ts'
 
 const t: PaneWorkspaceProps['t'] = key => (en as Record<string, string>)[key] ?? key
@@ -46,14 +46,13 @@ function sessionState(current: string | undefined, extra: Record<string, { blank
 
 function mount(initialCurrent: string | undefined = 's1') {
   const instance = createPaneLayoutStore().create()
-  const renderConversation = vi.fn(() => <div data-testid="feed" />)
-  // The SessionScope seat records the scope each pane's conversation renders
-  // under (undefined = the new-conversation hero).
-  const scopes: Array<string | undefined> = []
-  const SessionScope = (({ sessionId, children }: { sessionId?: string; children: React.ReactNode }) => {
-    scopes.push(sessionId)
-    return <div data-scope={sessionId ?? 'none'}>{children}</div>
-  }) as PaneWorkspaceProps['SessionScope']
+  // The pane-body delegate records the session each pane renders under
+  // (undefined = the new-conversation hero) and renders a marker.
+  const bodies: Array<string | undefined> = []
+  const renderPane = vi.fn((sessionId: string | undefined, key: string) => {
+    bodies.push(sessionId)
+    return <div data-testid={`feed-${key}`} data-pane-session={sessionId ?? 'none'} />
+  })
   const openSession = vi.fn()
   // The entry's split verb is a real split over the store (the anchor rule —
   // single pane keeps current, tree splits anchor null — lives in the
@@ -61,20 +60,44 @@ function mount(initialCurrent: string | undefined = 's1') {
   const splitWithNew = vi.fn((paneId: string, direction: 'horizontal' | 'vertical', anchor: string | null) => {
     instance.actions.splitPane(paneId, direction, anchor as never)
   })
+  const splitFocused = vi.fn((direction: 'horizontal' | 'vertical') => {
+    const state = instance.getSnapshot()
+    const paneId = state.focusedPaneId ?? allLeaves(state.root)[0]?.id
+    if (paneId === undefined) return
+    const anchor: string | null = state.root.type === 'leaf'
+      ? (currentRef.current ?? null)
+      : null
+    instance.actions.splitPane(paneId, direction, anchor as never)
+  })
+  const closeFocused = vi.fn(() => {
+    const state = instance.getSnapshot()
+    const paneId = state.focusedPaneId ?? allLeaves(state.root)[0]?.id
+    if (paneId !== undefined) instance.actions.closePane(paneId)
+  })
+  const hasSplit = vi.fn((): boolean => instance.getSnapshot().root.type !== 'leaf')
+  const usePaneStore = hookOf(instance)
   // Mutable current for the selection-change binding test.
   let current: string | undefined = initialCurrent
+  const currentRef: { current: string | undefined } = { current: initialCurrent }
   const element = () => (
     <PaneWorkspace
-      useStore={hookOf(instance)}
-      actions={instance.actions}
-      useSessions={((sel: (s: unknown) => unknown) => sel(sessionState(current))) as PaneWorkspaceProps['useSessions']}
-      useWorkspaces={((sel: (s: { recentWorkspaceId?: string }) => unknown) => sel({ recentWorkspaceId: 'ws1' })) as PaneWorkspaceProps['useWorkspaces']}
-      useSessionById={neverHook}
-      useProjectionById={neverHook}
-      SessionScope={SessionScope}
+      usePaneStore={usePaneStore}
+      paneActions={instance.actions}
+      useSessions={((sel: (s: unknown) => unknown) => sel(sessionState(currentRef.current))) as PaneWorkspaceProps['useSessions']}
+      useSession={neverHook}
+      useConversation={neverHook}
+      useInput={neverHook}
+      useProjection={neverHook}
+      inputActions={undefined}
+      sessionId={undefined}
+      useSessionPendingInteraction={neverHook}
+      useWorkspaces={neverHook}
       openSession={openSession}
       splitWithNew={splitWithNew}
-      renderConversation={renderConversation}
+      splitFocused={splitFocused}
+      closeFocused={closeFocused}
+      hasSplit={hasSplit}
+      renderPane={renderPane}
       t={t}
     />
   )
@@ -82,35 +105,39 @@ function mount(initialCurrent: string | undefined = 's1') {
   return {
     ...view,
     instance,
-    renderConversation,
-    scopes,
+    bodies,
+    renderPane,
     openSession,
     splitWithNew,
+    splitFocused,
+    closeFocused,
     rerender: () => { view.rerender(element()) },
     setCurrent: (next: string | undefined) => {
       current = next
+      currentRef.current = next
       view.rerender(element())
     },
+    get: () => ({ current }),
   }
 }
 
 describe('PaneWorkspace', () => {
-  it('single pane: renders the owner-provided feed full-bleed with no chrome', () => {
-    const { renderConversation, container, scopes } = mount()
-    expect(renderConversation).toHaveBeenCalledOnce()
-    expect(screen.getAllByTestId('feed')).toHaveLength(1)
+  it('single pane: renders the inject-provided feed full-bleed with no chrome', () => {
+    const { renderPane, container, bodies } = mount()
+    expect(renderPane).toHaveBeenCalledOnce()
+    expect(screen.getAllByTestId(/feed-/)).toHaveLength(1)
     expect(container.querySelector('[role="separator"]')).toBeNull()
-    expect(scopes).toEqual([])
+    expect(bodies).toEqual(['s1'])
   })
 
   it('no current session: the plain full-bleed hero with a new-conversation header (split from the start)', () => {
     // NB: mount(undefined) would hit the default parameter — start from a
     // session then clear the selection to reach the no-session hero.
-    const { renderConversation, instance, setCurrent, container } = mount()
+    const { renderPane, instance, setCurrent, container } = mount()
     act(() => { setCurrent(undefined) })
     // mount (session) + the hero branch re-render.
-    expect(renderConversation).toHaveBeenCalledTimes(2)
-    expect(screen.getAllByTestId('feed')).toHaveLength(1)
+    expect(renderPane).toHaveBeenCalledTimes(2)
+    expect(screen.getAllByTestId(/feed-/)).toHaveLength(1)
     // The hero gets the plugin's new-conversation header: title + split H/V
     // (no close — nothing to close while unsplit).
     expect(screen.getAllByText('New conversation')).toHaveLength(1)
@@ -136,20 +163,20 @@ describe('PaneWorkspace', () => {
     expect(screen.getAllByRole('button', { name: en['pane.close'] })).toHaveLength(2)
   })
 
-  it('split clones the pane: both panes render the full conversation, each under its own scope', () => {
-    const { instance, renderConversation, scopes } = mount()
-    renderConversation.mockClear()
-    scopes.length = 0
+  it('split clones the pane: both panes re-host the conversation, each under its own session', () => {
+    const { instance, renderPane, bodies } = mount()
+    renderPane.mockClear()
+    bodies.length = 0
     const id = instance.getSnapshot().root.id
     act(() => { instance.actions.splitPane(id, 'horizontal', 's1' as never) })
-    expect(renderConversation).toHaveBeenCalledTimes(2)
-    expect(scopes).toEqual(['s1', undefined])
+    expect(renderPane).toHaveBeenCalledTimes(2)
+    expect(bodies).toEqual(['s1', undefined])
     const divider = screen.getByRole('separator', { name: en['pane.split.divider'] })
     expect(divider.getAttribute('aria-orientation')).toBe('vertical')
     expect(divider.getAttribute('aria-valuenow')).toBe('50')
     // The FRESH pane is focused (split focuses the new pane); the original
     // is not.
-    const frames = [...document.querySelectorAll('[data-scope]')]
+    const frames = [...document.querySelectorAll('[data-pane-session]')]
       .map(el => el.closest('[class*="pane"]'))
       .filter((el): el is Element => el !== null)
     expect(frames).toHaveLength(2)
@@ -183,7 +210,7 @@ describe('PaneWorkspace', () => {
     if (root.type !== 'split') throw new Error('expected a split')
     act(() => { instance.actions.setPaneSession(root.second.id, 's2' as never) })
     openSession.mockClear()
-    const frames = [...document.querySelectorAll('[data-scope]')]
+    const frames = [...document.querySelectorAll('[data-pane-session]')]
       .map(el => el.closest('[class*="pane"]'))
       .filter((el): el is Element => el !== null)
     fireEvent.pointerDown(frames[0]!)
@@ -214,8 +241,8 @@ describe('PaneWorkspace', () => {
   })
 
   it('close returns to the single full-bleed pane', () => {
-    const { instance, renderConversation } = mount()
-    renderConversation.mockClear()
+    const { instance, renderPane } = mount()
+    renderPane.mockClear()
     const id = instance.getSnapshot().root.id
     act(() => { instance.actions.splitPane(id, 'horizontal', 's1' as never) })
     const closedId = (() => {
@@ -224,10 +251,10 @@ describe('PaneWorkspace', () => {
       return root.second.id
     })()
     act(() => { instance.actions.closePane(closedId) })
-    expect(screen.getAllByTestId('feed')).toHaveLength(1)
+    expect(screen.getAllByTestId(/feed-/)).toHaveLength(1)
     expect(screen.queryByRole('separator')).toBeNull()
     // split (2 panes) + the surviving single pane re-render.
-    expect(renderConversation).toHaveBeenCalledTimes(3)
+    expect(renderPane).toHaveBeenCalledTimes(3)
   })
 
   it('mod+shift+ArrowRight splits the focused pane; mod+shift+w closes it', () => {
@@ -358,10 +385,10 @@ function fireDrag(element: HTMLElement, kind: 'dragOver' | 'dragLeave' | 'drop',
   fireEvent(element, event)
 }
 
-/** One split pane by its scoped conversation (the test SessionScope stub). */
+/** One split pane by its rendered pane session marker. */
 function paneOf(scope: string): HTMLElement {
-  const scoped = document.querySelector(`[data-scope="${scope}"]`)
-  if (scoped === null) throw new Error(`no scoped element for "${scope}"`)
+  const scoped = document.querySelector(`[data-pane-session="${scope}"]`)
+  if (scoped === null) throw new Error(`no panned element for "${scope}"`)
   const pane = scoped.closest('[class*="pane"]')
   if (pane === null) throw new Error('no pane frame')
   return pane as HTMLElement

@@ -1,7 +1,7 @@
 {
   "name": "@dsh-external/dsh-split-panes",
-  "description": "DSH split-pane conversation plugin: PiUI-style multi-pane conversation surface — split/stack panes, per-pane sessions, sidebar session drag & drop, single-row fused header. Needs the renderer session-scope capability (see README).",
-  "version": "0.1.0",
+  "description": "DSH split-pane conversation plugin: PiUI-style multi-pane conversation surface — split/stack panes, per-pane sessions, sidebar session drag & drop, single-row fused header. No core patch required: panes re-host the native conversation components through the core's public slot and session APIs.",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -19,7 +19,6 @@
     "lib",
     "src",
     "tests",
-    "patches",
     "cordis.patch.yml",
     "dsh.plugin.json"
   ],
@@ -36,29 +35,41 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-layout"
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-primitives"
       ],
       "platform": "web"
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-client-runtime": "*",
+    "@deepseek-ai/dsh-client-locale": "*",
+    "@deepseek-ai/dsh-client-store": "*",
     "@deepseek-ai/dsh-client-ui-layout": "*",
     "@deepseek-ai/dsh-client-ui-primitives": "*",
+    "@deepseek-ai/dsh-client-ui-renderer": "*",
     "@deepseek-ai/dsh-client-ui-slots": "*",
-    "cordis": "^4.0.0-rc.7",
+    "@deepseek-ai/dsh-client-ui-session": "*",
+    "@deepseek-ai/dsh-api-session-controller": "*",
+    "@deepseek-ai/dsh-session": "*",
+    "@deepseek-ai/cordis": "^4.0.0",
     "react": "^18.2.0"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-client-runtime": "link:../dsh2026/deepseek-harness/packages/client/runtime",
+    "@deepseek-ai/dsh-api-session-controller": "link:../dsh2026/deepseek-harness/packages/api/session-controller",
+    "@deepseek-ai/dsh-client-locale": "link:../dsh2026/deepseek-harness/packages/client/locale",
+    "@deepseek-ai/dsh-client-store": "link:../dsh2026/deepseek-harness/packages/client/store",
     "@deepseek-ai/dsh-client-test-runtime": "link:../dsh2026/deepseek-harness/packages/test-support/client-runtime",
     "@deepseek-ai/dsh-client-ui-layout": "link:../dsh2026/deepseek-harness/packages/client/ui-layout",
     "@deepseek-ai/dsh-client-ui-primitives": "link:../dsh2026/deepseek-harness/packages/client/ui-primitives",
+    "@deepseek-ai/dsh-client-ui-renderer": "link:../dsh2026/deepseek-harness/packages/client/ui-renderer",
     "@deepseek-ai/dsh-client-ui-slots": "link:../dsh2026/deepseek-harness/packages/client/ui-slots",
+    "@deepseek-ai/dsh-client-ui-session": "link:../dsh2026/deepseek-harness/packages/client/ui-session",
+    "@deepseek-ai/dsh-client-ui-conversation": "link:../dsh2026/deepseek-harness/packages/client/ui-conversation",
+    "@deepseek-ai/dsh-session": "link:../dsh2026/deepseek-harness/packages/core/session",
+    "@deepseek-ai/cordis": "link:../dsh2026/deepseek-harness/vendor/cordis",
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "^18.3.1",
-    "cordis": "link:../dsh2026/deepseek-harness/vendor/cordis",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tsdown": "^0.22.2",
@@ -68,9 +79,7 @@
     "@testing-library/react": "^16.1.0",
     "@testing-library/dom": "^10.4.0",
     "jsdom": "^26.0.0",
-    "@deepseek-ai/dsh-client-locale": "link:../dsh2026/deepseek-harness/packages/client/locale",
     "vite-tsconfig-paths": "^5.1.0"
   },
   "license": "BSD-3-Clause"
 }
-

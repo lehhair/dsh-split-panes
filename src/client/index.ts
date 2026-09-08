@@ -1,15 +1,45 @@
-/** Registers the pane workspace and the header split/close affordances. */
-import type { ClientContext, EngineStoreHandle, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
+/**
+ * Registers the pane workspace (a replacement for the `conversation` slot)
+ * and the header split/close affordances.
+ *
+ * The takeover is a SLOT SHADOW on the core's single conversation slot:
+ * this entry registers at a lower priority than ui-conversation's
+ * ConversationRoot, so while this plugin is loaded the conversation column
+ * renders the pane workspace; the stock root entry stays registered (its
+ * child-slot declarations and the session/header/composer occupants
+ * survive), and unload returns the stock rendering byte-identically.
+ *
+ * Every pane re-hosts the native conversation occupants bound to an
+ * EXPLICIT pane session through the core's by-id standard-source adapter
+ * (`ctx.uiSession.adapter.resolve`) — see kit.ts / render-host.ts /
+ * PaneBody.tsx. No core patch: the by-id render path is assembled from
+ * public slot-registry, ui-session, and sessions-service surfaces.
+ *
+ * The split tree is ONE module-owned store instance (global viewing state,
+ * deliberately NOT a per-session slot store — the tree must survive session
+ * switches). The workspace and the header buttons both operate that single
+ * instance through the apply closure.
+ */
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import { createElement } from 'react'
+// Type-only: pulls the slots registry's Context merge (ctx.slots).
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+// Type-only: pulls the ui-session Context merge (ctx.uiSession).
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+// Type-only: pulls the sessions-service Context merge (ctx.sessions).
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-// Type-only: pulls this package's GlobalStandardProps merge (SessionScope +
-// by-id seats) into every compilation unit that touches the panes surfaces.
-import type {} from './global-seats.ts'
-import { PaneWorkspace, SESSION_DRAG_TYPE, type PaneWorkspaceInjected } from './PaneWorkspace.tsx'
+// Type-only: pulls the ui-layout SlotMap merge ('conversation').
+import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import { bindSelector } from './kit.ts'
+import { PaneWorkspace, type PaneWorkspaceInjected } from './PaneWorkspace.tsx'
+import { PaneBody } from './PaneBody.tsx'
 import { SplitPaneButton } from './SplitPaneButton.tsx'
 import { SplitVerticalButton } from './SplitVerticalButton.tsx'
 import { ClosePaneButton } from './ClosePaneButton.tsx'
-import { createPaneLayoutStore, type PaneActions, type PaneLayoutState } from './pane-layout-store.ts'
+import { createPaneLayoutStore, allLeaves, type PaneLayoutState } from './pane-layout-store.ts'
 import { en, zh, type PaneKey } from './locales.ts'
 // Plugin-owned global chrome (single-row header, sidebar fusion): injected
 // with this bundle, removed on unload — the stock GUI stays unchanged
@@ -21,7 +51,7 @@ export type { SplitPaneButtonProps } from './SplitPaneButton.tsx'
 export type { SplitVerticalButtonProps } from './SplitVerticalButton.tsx'
 export type { ClosePaneButtonProps } from './ClosePaneButton.tsx'
 export type { PaneKey } from './locales.ts'
-export type { PaneLayoutState, PaneNode, PaneLeaf, PaneSplit } from './pane-layout-store.ts'
+export type { PaneLayoutState, PaneLeaf, PaneNode, PaneSplit } from './pane-layout-store.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -33,34 +63,28 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Dictionary namespace owned by this plugin (pane chrome copy). */
 const NS = 'panes'
 
+/** The priority at which this plugin shadows ui-conversation's root (0). */
+const TAKEOVER_PRIORITY = -1
+
 /** Services required by the panes plugin. */
-export const inject = ['slots', 'locale', 'sessions']
+export const inject = ['slots', 'locale', 'sessions', 'uiSession']
 
 /**
- * Register the panes-plugin surfaces over ONE shared layout store instance:
- * the 'conversation.panes' workspace (declared by the ui-layout frame, ROOT
- * scope — the split tree is global viewing state) and the split/close
- * buttons inside the conversation header's actions row (declared by
- * ui-conversation, session scope; registered through an erased name so this
- * package keeps its one-way dependency direction). The framework pins one
- * scope per store HANDLE, so each registration gets its own wrapper handle
- * whose create() returns the SAME live instance — every surface operates on
- * one split tree regardless of its slot's scope. Registrations wait on their
- * owner's declaration via slots.inject; absent this plugin, the frame falls
- * back to the plain conversation render.
+ * Register the panes-plugin surfaces over ONE shared pane-layout store
+ * instance: the conversation-column takeover (the plugin's workspace) and
+ * the split/close buttons inside the conversation header's actions row.
  * @param ctx - Client root context.
  */
 export function apply(ctx: ClientContext): void {
-  const paneLayoutStore = createPaneLayoutStore()
-  // One shared live instance (apply-time create is the sanctioned path): the
-  // workspace and the header buttons must mutate the SAME split tree. Each
-  // registration gets its own wrapper handle (distinct identity, so the
-  // framework's one-handle-per-scope pin never fires) whose create() returns
-  // the shared instance; the runtime only ever calls create() on a handle,
-  // so the erased spec member is never touched.
-  const paneStore = paneLayoutStore.create()
-  const sharedHandle = (): EngineStoreHandle<PaneLayoutState, PaneActions> =>
-    ({ create: () => paneStore }) as unknown as EngineStoreHandle<PaneLayoutState, PaneActions>
+  // The ONE shared split-tree instance (global viewing state).
+  const paneStore = createPaneLayoutStore().create()
+  const paneActions = paneStore.actions
+  const usePaneStore = <S>(selector: (state: PaneLayoutState) => S): S =>
+    bindSelector({
+      getSnapshot: () => paneStore.getSnapshot(),
+      subscribe: fn => paneStore.subscribe(fn),
+    })(selector)
+  const paneTree = (): PaneLayoutState => paneStore.getSnapshot()
 
   /**
    * Split, leaving the new pane as a NEW-CONVERSATION PLACEHOLDER (no host
@@ -71,8 +95,27 @@ export function apply(ctx: ClientContext): void {
    * shared until each pane actually starts its own conversation.
    */
   const splitWithNew: PaneWorkspaceInjected['splitWithNew'] = (paneId, direction, anchor) => {
-    paneStore.actions.splitPane(paneId, direction, anchor)
+    paneActions.splitPane(paneId, direction, anchor)
   }
+
+  /** The header affordances operate on the shared tree's FOCUSED pane. */
+  const splitFocused: PaneWorkspaceInjected['splitFocused'] = (direction) => {
+    const state = paneTree()
+    const paneId = state.focusedPaneId ?? allLeaves(state.root)[0]?.id
+    if (paneId === undefined) return
+    // Splitting the SINGLE full-bleed pane anchors the current selection;
+    // splitting inside the tree never anchors.
+    const anchor: SessionId | null = state.root.type === 'leaf'
+      ? (ctx.sessions.list.getSnapshot().current ?? null)
+      : null
+    paneActions.splitPane(paneId, direction, anchor)
+  }
+  const closeFocused: PaneWorkspaceInjected['closeFocused'] = () => {
+    const state = paneTree()
+    const paneId = state.focusedPaneId ?? allLeaves(state.root)[0]?.id
+    if (paneId !== undefined) paneActions.closePane(paneId)
+  }
+  const hasSplit = (): boolean => paneTree().root.type !== 'leaf'
 
   ctx.effect(() => { return ctx.locale.register(NS, { zh, en }) }, 'ui-panes: dictionaries')
 
@@ -84,79 +127,76 @@ export function apply(ctx: ClientContext): void {
   // panes can receive the drag. This keeps the whole interaction inside the
   // plugin: no core or side-bar changes needed to install it.
   ctx.effect(() => {
+    const SESSION_DRAG_TYPE = 'application/x-dsh-session'
     const onDragStart = (event: DragEvent): void => {
       const target = event.target as HTMLElement | null
       const row = target?.closest('[role="treeitem"][draggable="true"]') as HTMLElement | null
       if (row === null || event.dataTransfer === null) return
-      // A newer side-bar may already carry the id — trust its exact data.
       if (Array.from(event.dataTransfer.types).includes(SESSION_DRAG_TYPE)) return
-      const sessionId = resolveSessionIdFromRow(row, ctx.sessions.list.getSnapshot().byId)
+      const byId = ctx.sessions.list.getSnapshot().byId
+      const sessionId = resolveSessionIdFromRow(row, byId)
       if (sessionId !== null) event.dataTransfer.setData(SESSION_DRAG_TYPE, sessionId)
     }
     document.addEventListener('dragstart', onDragStart, true)
     return () => { document.removeEventListener('dragstart', onDragStart, true) }
   }, 'ui-panes: session drag data')
 
-  ctx.effect(
-    () => ctx.slots.inject('conversation.panes', () => ctx.slots.register({
-      name: 'conversation.panes',
-      store: sharedHandle(),
-      locale: NS,
-      inject: (): PaneWorkspaceInjected => ({
-        openSession: (sessionId) => { ctx.sessions.open(sessionId) },
-        splitWithNew,
+  // The pane-body render delegate: one native conversation bound to an
+  // explicit pane session, keyed by pane identity for React remount.
+  const renderPane: PaneWorkspaceInjected['renderPane'] = (sessionId, key) => (
+    createElement(PaneBody, { key, ctx, sessionId })
+  )
+
+  /** The full injected operations face shared by the workspace + buttons. */
+  const operations: PaneWorkspaceInjected = {
+    openSession: (sessionId) => { ctx.sessions.open(sessionId) },
+    splitWithNew,
+    splitFocused,
+    closeFocused,
+    hasSplit,
+    usePaneStore,
+    paneActions,
+    renderPane,
+  }
+
+  // The conversation-column takeover. No store seat: the split tree is a
+  // module-owned singleton, delivered through the inject face (a per-session
+  // slot store would mint one instance per session, breaking the global
+  // tree). The inject runs per declared session; it returns the same
+  // operations each time.
+  ctx.slots.register({
+    name: 'conversation',
+    priority: TAKEOVER_PRIORITY,
+    locale: NS,
+    inject: (): PaneWorkspaceInjected => operations,
+  }, PaneWorkspace)
+
+  // Header split/close buttons: registered into the session-scoped header
+  // actions row (declared by ui-conversation), operating the SAME shared
+  // pane tree through the closure captured above. No store seat.
+  ctx.slots.inject('conversation.session.header.actions' as never, function* () {
+    yield ctx.slots.register({
+      name: 'conversation.session.header.actions',
+      id: 'panes-split',
+      order: 1000,
+      inject: (): PaneWorkspaceInjected => operations,
+    } as never, SplitPaneButton as never)
+    yield ctx.slots.register({
+      name: 'conversation.session.header.actions',
+      id: 'panes-split-v',
+      order: 1001,
+      inject: (): PaneWorkspaceInjected => operations,
+    } as never, SplitVerticalButton as never)
+    yield ctx.slots.register({
+      name: 'conversation.session.header.actions',
+      id: 'panes-close',
+      order: 1002,
+      inject: (): Pick<PaneWorkspaceInjected, 'closeFocused' | 'hasSplit'> => ({
+        closeFocused,
+        hasSplit,
       }),
-    }, PaneWorkspace)),
-    'ui-panes: workspace registration',
-  )
-
-  ctx.effect(
-    () => ctx.slots.inject('conversation.session.header.actions' as never, () => ctx.slots.register(
-      // The target slot is declared by ui-conversation, whose types this
-      // package must not import (one-way dependency). The erased call keeps
-      // the registration correct at runtime — the loader resolves the real
-      // spec.
-      {
-        name: 'conversation.session.header.actions',
-        id: 'panes-split',
-        order: 1000,
-        store: sharedHandle(),
-        locale: NS,
-        inject: (): Pick<PaneWorkspaceInjected, 'splitWithNew'> => ({ splitWithNew }),
-      } as never,
-      SplitPaneButton as never,
-    )),
-    'ui-panes: header split button',
-  )
-
-  ctx.effect(
-    () => ctx.slots.inject('conversation.session.header.actions' as never, () => ctx.slots.register(
-      {
-        name: 'conversation.session.header.actions',
-        id: 'panes-split-v',
-        order: 1001,
-        store: sharedHandle(),
-        locale: NS,
-        inject: (): Pick<PaneWorkspaceInjected, 'splitWithNew'> => ({ splitWithNew }),
-      } as never,
-      SplitVerticalButton as never,
-    )),
-    'ui-panes: header split-vertical button',
-  )
-
-  ctx.effect(
-    () => ctx.slots.inject('conversation.session.header.actions' as never, () => ctx.slots.register(
-      {
-        name: 'conversation.session.header.actions',
-        id: 'panes-close',
-        order: 1002,
-        store: sharedHandle(),
-        locale: NS,
-      } as never,
-      ClosePaneButton as never,
-    )),
-    'ui-panes: header close-pane button',
-  )
+    } as never, ClosePaneButton as never)
+  })
 }
 
 /**
@@ -172,7 +212,7 @@ export function apply(ctx: ClientContext): void {
  */
 function resolveSessionIdFromRow(
   row: HTMLElement,
-  byId: SessionListState['byId'],
+  byId: Record<string, { id: string; displayTitle: string }>,
 ): string | null {
   const cells = [...row.querySelectorAll(':scope > span')]
     .map(cell => cell.textContent.trim())

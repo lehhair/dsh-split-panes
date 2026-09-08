@@ -23,8 +23,20 @@ const PLATFORM_MODULES = [
   '@deepseek-ai/dsh-client-schema-form',
 ] as const
 
-/** Externals resolved from the loader module table. */
-const CLIENT_EXTERNALS: readonly string[] = [...PLATFORM_MODULES, '@deepseek-ai/dsh-client-runtime/client']
+/** Externals resolved from the loader module table (platform + core client services). */
+const CLIENT_EXTERNALS: readonly string[] = [
+  ...PLATFORM_MODULES,
+  '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-ui-renderer',
+  '@deepseek-ai/dsh-client-ui-session',
+  '@deepseek-ai/dsh-api-session-controller',
+  '@deepseek-ai/dsh-client-store',
+  '@deepseek-ai/dsh-client-locale',
+  '@deepseek-ai/dsh-client-ui-layout',
+  '@deepseek-ai/dsh-client-ui-conversation',
+  '@deepseek-ai/dsh-client-ui-primitives',
+  '@deepseek-ai/dsh-session',
+]
 
 const CSS_VIRTUAL_PREFIX = '\0dsh-css:'
 const CSS_VIRTUAL_SUFFIX = '.mjs'

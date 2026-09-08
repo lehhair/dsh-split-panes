@@ -1,25 +1,20 @@
 /**
  * Header close-pane affordance (registered into the conversation header's
  * actions row): closes the FOCUSED pane — visible only while the split tree
- * actually has panes to close. Reads the SAME pane-layout store instance as
- * the workspace (both entries share the handle).
- *
- * The props type deliberately rides 'conversation.panes' (the layout-owned
- * root-scope slot this package composes against): it delivers the global
- * standard kit, and typing this component that way keeps the package's
- * one-way dependency direction (ui-conversation renders the 'conversation'
- * entry this package's panes reuse).
+ * actually has panes to close. Operates the SHARED pane tree through the
+ * plugin's injected operations.
  */
-import type { PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+// Type-only: pulls the ui-conversation SlotMap merge (header actions slot).
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { createPaneLayoutStore } from './pane-layout-store.ts'
-import { allLeaves } from './pane-layout-store.ts'
 import css from './PaneWorkspace.module.css'
+import type { PaneWorkspaceInjected } from './PaneWorkspace.tsx'
 
-/** Full composed props: global kit + shared store + locale. */
+/** Full composed props: session kit + shared inject + locale. */
 export type ClosePaneButtonProps =
-  & PropsRuntime<'conversation.panes'>
-  & PropsStore<ReturnType<typeof createPaneLayoutStore>>
+  & PropsRuntime<'conversation.session.header.actions'>
+  & InjectFace<Pick<PaneWorkspaceInjected, 'closeFocused' | 'hasSplit'>>
   & PropsLocale<'panes'>
 
 /**
@@ -27,20 +22,15 @@ export type ClosePaneButtonProps =
  * @param props - composed slot props (see ClosePaneButtonProps).
  * @returns the close button, or null while there is no split to close.
  */
-export function ClosePaneButton({ useStore, actions, t }: ClosePaneButtonProps) {
-  const root = useStore(s => s.root)
-  const focusedPaneId = useStore(s => s.focusedPaneId)
-  if (root.type === 'leaf') return null
+export function ClosePaneButton({ closeFocused, hasSplit, t }: ClosePaneButtonProps) {
+  if (!hasSplit()) return null
   return (
     <button
       type="button"
       className={css.closeButton}
       aria-label={t('pane.close')}
       title={t('pane.close')}
-      onClick={() => {
-        const paneId = focusedPaneId ?? allLeaves(root)[0]?.id
-        if (paneId !== undefined) actions.closePane(paneId)
-      }}
+      onClick={() => { closeFocused() }}
     >
       <IconCloseOutline16 />
     </button>

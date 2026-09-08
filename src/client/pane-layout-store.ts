@@ -5,8 +5,8 @@
  * the session it starts. Pane state is viewing state — sessions themselves
  * live in the object layer, never here.
  */
-import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-runtime/client'
-import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-store'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
 /** One chat pane: a session slot (null = the new-conversation entry). */
 export interface PaneLeaf {
