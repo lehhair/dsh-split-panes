@@ -31,6 +31,9 @@ import type { StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
 import { standardHookPropName } from '@deepseek-ai/dsh-client-ui-slots'
 import { bindSelector, type PaneKit, type KeyedSelectorHook } from './kit.ts'
 
+/** The priority at which this plugin shadows ui-conversation's root (0). */
+const TAKEOVER_PRIORITY = -1
+
 /** The store-instance shape this package resolves (type-erased view of the engine instance). */
 export interface PaneStoreInstance {
   readonly actions: Readonly<Record<string, (...args: unknown[]) => void>>
@@ -195,35 +198,45 @@ const NO_RECORDS: readonly StoredEntry[] = Object.freeze([])
 
 /**
  * Resolve one registered entry into a pane occupant (undefined when the
- * record has no component — the record shape this package knows).
+ * record has no component). React components come in several runtime shapes:
+ * plain functions, class components, and the memo()/forwardRef() OBJECT
+ * wrappers (typeof 'object') — the production renderer accepts all of them
+ * (createElement), so this package must too.
  */
 export function resolveOccupant(raw: StoredEntry): PaneOccupant | undefined {
   const record = viewOf(raw)
   const component = record.component
-  if (typeof component !== 'function') return undefined
+  if (component === null || component === undefined) return undefined
+  if (typeof component !== 'function' && typeof component !== 'object') return undefined
   const store = record.store
   const render: PaneOccupant['render'] = (ctx, renderChild, owner, slotInject, hookContext) => {
     const sessionId = ctx.kit.sessionId as string | undefined
     // 1. standard kit props (plain props first; synthesized hooks override).
     const props: Record<string, unknown> = { ...ctx.kit.props }
-    // 2. entry inject factory (sessionId [+ actions]).
-    let face: Record<string, unknown> = {}
-    if (record.inject !== undefined) {
-      const actions = store?.create(sessionId).actions
-      face = bindInjectSources(record.inject(
-        ...(store !== undefined ? [sessionId, actions] : [sessionId]),
-      ) as Record<string, unknown>)
-    }
-    Object.assign(props, face)
-    // 3. store instance.
+    // 2. store instance (cached per handle x session — the production
+    // renderer's storeOf, so the occupant's view state/draft survives across
+    // renders instead of being re-minted every render).
+    let instance: PaneStoreInstance | undefined
     if (store !== undefined) {
-      const instance = store.create(sessionId)
+      instance = storeOf(store, sessionId)
       props['useStore'] = bindSelector({
-        getSnapshot: () => instance.getSnapshot(),
-        subscribe: fn => instance.subscribe(fn),
+        getSnapshot: () => instance!.getSnapshot(),
+        subscribe: fn => instance!.subscribe(fn),
       })
       props['actions'] = instance.actions
     }
+    // 3. entry inject face (cached per entry x session: the same face the
+    // production renderer memoizes, so the occupant's injected callbacks stay
+    // identity-stable and keyed hook families don't churn subscriptions).
+    let face: Record<string, unknown> = {}
+    if (record.inject !== undefined) {
+      face = cachedInject(
+        record as EntryRecord & { inject: NonNullable<EntryRecord['inject']> },
+        sessionId,
+        instance?.actions,
+      )
+    }
+    Object.assign(props, face)
     // 4. global standard seats + child dispatch. Absent binding hooks
     // (explicit undefined) are skipped — a session-maybe occupant renders
     // its absent branch on the missing seat instead of crashing on an
@@ -275,6 +288,50 @@ export function resolveOccupant(raw: StoredEntry): PaneOccupant | undefined {
   }
 }
 
+/** store instance cache: handle x session identity. */
+const storeCache = new WeakMap<PaneStoreHandle, Map<string, PaneStoreInstance>>()
+
+/** Resolve (and lazily cache) the engine store instance for one handle x session. */
+function storeOf(handle: PaneStoreHandle, sessionId: string | undefined): PaneStoreInstance {
+  let perSession = storeCache.get(handle)
+  if (perSession === undefined) {
+    perSession = new Map()
+    storeCache.set(handle, perSession)
+  }
+  const key = sessionId ?? ''
+  let instance = perSession.get(key)
+  if (instance === undefined) {
+    instance = handle.create(sessionId)
+    perSession.set(key, instance)
+  }
+  return instance
+}
+
+/** entry inject face cache: entry record x session identity. */
+const injectCache = new WeakMap<EntryRecord, Map<string, Record<string, unknown>>>()
+
+/** Resolve (and lazily cache) the entry's injected face for one pane session. */
+function cachedInject(
+  record: EntryRecord & { inject: NonNullable<EntryRecord['inject']> },
+  sessionId: string | undefined,
+  actions: Readonly<Record<string, (...args: unknown[]) => void>> | undefined,
+): Record<string, unknown> {
+  let perSession = injectCache.get(record)
+  if (perSession === undefined) {
+    perSession = new Map()
+    injectCache.set(record, perSession)
+  }
+  const key = sessionId ?? ''
+  let face = perSession.get(key)
+  if (face === undefined) {
+    face = bindInjectSources(record.inject(
+      ...(actions !== undefined ? [sessionId, actions] : [sessionId]),
+    ) as Record<string, unknown>)
+    perSession.set(key, face)
+  }
+  return face
+}
+
 /**
  * Create a pane render host over one pane's kit. `entries(key)` reads the
  * LIVE slot ledger so registrations (view tabs, node renderers, dock strips)
@@ -284,7 +341,7 @@ export function createPaneRenderHost(
   slots: PaneMount['slots'],
   kit: PaneKit,
   locale?: { bind(ns: string): (key: string, params?: Record<string, unknown>) => string },
-): PaneRenderHost & { occupants(key: string): readonly PaneOccupant[] } {
+): PaneRenderHost & { occupants(key: string): readonly PaneOccupant[] } & { renderConversationRoot(): ReactNode } {
   const cache = new Map<string, readonly PaneOccupant[]>()
 
   const occupants = (key: string): readonly PaneOccupant[] => {
@@ -358,7 +415,38 @@ export function createPaneRenderHost(
     },
   }
   mount.renderChild = renderChild
-  return { renderSlot: renderChild.renderSlot, renderSlotChain: renderChild.renderSlotChain, occupants }
+  /**
+   * Render the ConversationRoot ENTRY itself (the native conversation UI) for
+   * THIS pane session — the pure-extension path: instead of re-implementing
+   * ConversationRoot's layout (hero, workspace picker, composer variants,
+   * measurements, width handles), the plugin captures the stock component and
+   * feeds it THIS pane's binding kit + the pane's own child dispatch, so the
+   * stock layout renders verbatim under the pane session. The stock entry is
+   * selected by priority: it is the NON-takeover occupant of 'conversation'
+   * (this plugin's own takeover registers at a lower priority, so the
+   * conversation slot renders the pane workspace, while every pane re-hosts
+   * the stock ConversationRoot below it).
+   */
+  const renderConversationRoot = (): ReactNode => {
+    // The stock ConversationRoot entry: every 'conversation' occupant except
+    // this plugin's takeover (which registers at priority -1 / lower).
+    const rootEntry = slots.entries('conversation')
+      .find(raw => ((viewOf(raw).options?.priority ?? 0) > TAKEOVER_PRIORITY))
+    if (rootEntry === undefined) return null
+    const occupant = resolveOccupant(rootEntry)
+    if (occupant === undefined) return null
+    return (
+      <PaneBoundary fallback={null}>
+        {occupant.render(mount, renderChild, {}, EMPTY_SLOT_INJECT, undefined)}
+      </PaneBoundary>
+    )
+  }
+  return {
+    renderSlot: renderChild.renderSlot,
+    renderSlotChain: renderChild.renderSlotChain,
+    occupants,
+    renderConversationRoot,
+  }
 }
 
 /** The pane render host + kit bundle handed to PaneFrame. */

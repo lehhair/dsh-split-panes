@@ -35,7 +35,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { bindSelector } from './kit.ts'
 import { PaneWorkspace, type PaneWorkspaceInjected } from './PaneWorkspace.tsx'
-import { PaneBody } from './PaneBody.tsx'
+import { PaneConversation } from './PaneConversation.tsx'
 import { SplitPaneButton } from './SplitPaneButton.tsx'
 import { SplitVerticalButton } from './SplitVerticalButton.tsx'
 import { ClosePaneButton } from './ClosePaneButton.tsx'
@@ -141,10 +141,15 @@ export function apply(ctx: ClientContext): void {
     return () => { document.removeEventListener('dragstart', onDragStart, true) }
   }, 'ui-panes: session drag data')
 
-  // The pane-body render delegate: one native conversation bound to an
-  // explicit pane session, keyed by pane identity for React remount.
+  // The pane render delegate: capture the STOCK ConversationRoot entry and
+  // re-host it under the pane session — the pure-extension path. Instead of
+  // re-implementing ConversationRoot's layout (hero, workspace picker,
+  // composer variants, measurements, width handles), every pane renders the
+  // native component verbatim, bound to the pane's own session through the
+  // by-id kit. The kit and host are memoized per pane session (identity-
+  // stable hooks / store instances / inject faces).
   const renderPane: PaneWorkspaceInjected['renderPane'] = (sessionId, key) => (
-    createElement(PaneBody, { key, ctx, sessionId })
+    createElement(PaneConversation, { key, ctx, sessionId })
   )
 
   /** The full injected operations face shared by the workspace + buttons. */

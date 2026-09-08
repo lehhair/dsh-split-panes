@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-/** Reproduce the runtime failure: PaneBody renders the stock conversation
+/** Reproduce the runtime failure: PaneConversation renders the stock conversation
     occupants through the pane render host. This mounts the REAL
     ui-conversation assembly and renders the REAL occupants (header, session
     body, composer) with the pane kit — the path the mocked unit tests skip. */
@@ -16,9 +16,20 @@ import {
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { buildPaneKit } from '../src/client/kit.ts'
 import { createPaneRenderHost } from '../src/client/render-host.tsx'
-import { PaneBody } from '../src/client/PaneBody.tsx'
+import { PaneConversation } from '../src/client/PaneConversation.tsx'
 
 usePinnedBrowserLanguages('zh-CN')
+
+// jsdom lacks ResizeObserver — ConversationRoot's measurement logic needs it.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  class RO {
+    constructor(_cb: unknown) {}
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  ;(globalThis as Record<string, unknown>).ResizeObserver = RO
+}
 
 const ROOT = 'root-1' as SessionId
 
@@ -79,7 +90,7 @@ describe('pane render host over the real conversation assembly', () => {
     }
   }, 20000)
 
-  it('renders the REAL PaneBody (header + session body + composer)', async () => {
+  it('renders the REAL PaneConversation (header + session body + composer)', async () => {
     const b = await bench()
     try {
       // Register a stub chat view so the session body has an active view
@@ -89,7 +100,7 @@ describe('pane render host over the real conversation assembly', () => {
         (() => createElement('div', { 'data-testid': 'pane-chat-view' })) as never,
       )
       await b.runtime.flush()
-      const view = render(createElement(PaneBody, { ctx: b.runtime.ctx, sessionId: ROOT, key: 'p' }))
+      const view = render(createElement(PaneConversation, { ctx: b.runtime.ctx, sessionId: ROOT, key: 'p' }))
       // Every re-hosted region mounts: the header, the session body (the
       // active chat view), and the composer card. A crash in any occupant
       // would surface through the PaneBoundary fallback (empty region).

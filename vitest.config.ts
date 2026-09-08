@@ -33,6 +33,7 @@ export default defineConfig({
       '@deepseek-ai/dsh-client-ui-renderer/client': `${core}/packages/client/ui-renderer/src/client/index.ts`,
       '@deepseek-ai/dsh-client-ui-session/client': `${core}/packages/client/ui-session/src/client/index.ts`,
       '@deepseek-ai/dsh-client-ui-conversation/client': `${core}/packages/client/ui-conversation/src/client/index.ts`,
+      '@deepseek-ai/dsh-client-ui-chat/client': `${core}/packages/client/ui-chat/src/client/index.ts`,
       '@deepseek-ai/dsh-api-session-controller/client': `${core}/packages/api/session-controller/src/client/index.ts`,
       '@deepseek-ai/dsh-session/types': `${core}/packages/core/session/src/types.ts`,
       '@deepseek-ai/dsh-client-test-runtime': `${core}/packages/test-support/client-runtime/src/index.ts`,

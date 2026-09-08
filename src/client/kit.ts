@@ -113,9 +113,19 @@ export type PaneContext = Context & {
   readonly locale?: { bind(ns: string): (key: string, params?: Record<string, unknown>) => string } | undefined
 }
 
+/**
+ * The maybe-hook for an ABSENT source (the renderer's maybeObservableHook /
+ * useAbsentSnapshot semantics): subscribes the absent source so the hook
+ * call order stays stable across the present/absent transition, but the
+ * component's selector is NEVER called — the value is always `undefined`.
+ * This is what a session-maybe occupant (ConversationRoot, InputBar) reads
+ * when no session is bound: `useSession(s => s.promptError)` must yield
+ * `undefined`, never `undefined.promptError`.
+ */
 function absentHook<Snapshot>(): SelectorHook<Snapshot> {
   const useAbsent = bindSelector(ABSENT_SOURCE)
-  return (selector) => useAbsent((_value: undefined) => selector(undefined as unknown as Snapshot))
+  return ((_selector: (snapshot: Snapshot) => unknown) =>
+    useAbsent(() => undefined as never)) as SelectorHook<Snapshot>
 }
 
 /**
@@ -195,7 +205,11 @@ export function buildPaneKit(
     // synthesized hook props overwrite.
     for (const [name, value] of Object.entries(binding.props)) props[name] = value
     for (const [name, source] of Object.entries(binding.hooks)) {
-      hooks[name] = source === undefined ? undefined : bindSelector(source)
+      // Absent sources bind to the absent hook (a FUNCTION that returns
+      // undefined) — the renderer's maybeObservableHook semantics. A
+      // session-maybe occupant (ConversationRoot) reads these seats
+      // unconditionally, so they must always be functions, never undefined.
+      hooks[name] = source === undefined ? absentHook() : bindSelector(source)
     }
     for (const [name, source] of Object.entries(binding.keyedHooks)) {
       keyedHooks[name] = source === undefined
@@ -205,6 +219,16 @@ export function buildPaneKit(
           return useValue(((value) => (selector ?? identity)(value)) as (snapshot: unknown) => S, equal)
         })
     }
+  }
+
+  // The session-maybe seats (conversation/input) must ALWAYS be functions,
+  // even without a binding (the hero/new-conversation pane): ConversationRoot
+  // destructures and calls them unconditionally, and the stock renderer hands
+  // it the maybe-hook (absent → undefined value) in that state, not a missing
+  // function. Bind the absent hook for every standard seat the kit did not
+  // resolve, so a missing binding never leaves an undefined function behind.
+  for (const name of ['conversation', 'input']) {
+    if (hooks[name] === undefined) hooks[name] = absentHook()
   }
 
   return {

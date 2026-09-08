@@ -17,24 +17,24 @@ DSH 对话分屏插件（PiUI 风格）：把信息流分成多个可独立操�
 
 ![dsh-split-panes 分屏效果](screenshots/split-panes.png)
 
-## 架构（免补丁）
+## 架构（免补丁，纯扩展）
 
-核心（≥ 0.1.3-alpha.1）的渲染器只把**当前选择**会话的 standard-source binding 提供给 slot 组件，不提供按任意 id 渲染的原语。插件因此**自持渲染层级**——全部用核心公开面组装：
+核心（≥ 0.1.3-alpha.1）的渲染器只把**当前选择**会话的 standard-source binding 提供给 slot 组件，**没有提供按任意 id 渲染的扩展点**（`ScopeBindingContext`/host 实例/renderArea 的内容 dispatch 都是包私有或不渲染内容）。插件因此**不自建渲染层、不复刻布局**，而是**捕获原生 `ConversationRoot` 组件，喂给它 pane 会话的数据与 dispatch**——每个 pane 渲染真正的原生对话界面。
 
 | 核心公开面 | 插件用途 |
 |---|---|
-| `ctx.uiSession.adapter.resolve(id)` | 按 pane 会话解析其**完整 standard-source binding**（session/conversation/input hooks、projection keyed hooks、inputActions props）——by-id 渲染的数据底座 |
+| `ctx.uiSession.adapter.resolve(id)` | 按 pane 会话解析其**完整 standard-source binding**（session/conversation/input hooks、projection keyed hooks、inputActions props）——by-id 数据底座 |
 | `ctx.sessions.sessionOf(scopeCtx)` | 触发 pane 会话的 `open()`（幂等、与 stage 无关），拉取历史窗口与实时事件流 |
-| `ctx.slots.entries(key)` | 捕获原生注册条目（ChatView、InputBar、session header、各 node renderer、dock strips）——**组件本体 100% 是原生** |
-| `entry.inject(sessionId, actions)` + `handle.create(sessionId)` | 每个被捕获条目的注入面与 per-session store 实例，与官方渲染器同语义 |
+| `ctx.slots.entries('conversation')` | 捕获 **`ConversationRoot` 条目**（component + inject + locale）——**原生对话界面本身**，含 hero/workspace picker/composer/测量/width handles |
+| `ConversationRoot 条目的 inject` | **复用原生 `selectWorkspace`**（工作区选择 + draft 迁移）与 `hooks.composerBlock`——不需要自己实现 |
 
-- **`src/client/kit.ts`**：`buildPaneKit` 把 pane binding 的裸 observable 绑定成本插件的 uSES selector hooks（与官方 renderer 的 bind 契约一致），并触发会话打开
-- **`src/client/render-host.tsx`**：捕获 `ctx.slots.entries()` 的条目，为每窗格重组其 kit + inject + store + 子槽 dispatch（`renderSlot`/`renderSlotChain`），包错误边界；旁路兜底
-- **`src/client/PaneBody.tsx`**：一个 pane 的原生会话正文（header + view + composer），绑定到 pane 会话
-- **`src/client/PaneWorkspace.tsx`**：注册为 `conversation` 槽的**低优先级影子**（slot shadow），渲染分屏树；未分屏=单窗格原生；卸载即回到原生渲染
+- **`src/client/kit.ts`**：`buildPaneKit` 把 pane binding 的裸 observable 绑定成本插件的 uSES selector hooks（与官方 renderer 的 bind 契约一致，含 absent/maybe hook 语义），并触发会话打开
+- **`src/client/render-host.tsx`**：捕获 `ctx.slots.entries()` 的条目，为每窗格重组其 kit + inject + store + 子槽 dispatch（`renderSlot`/`renderSlotChain`），包错误边界
+- **`src/client/PaneConversation.tsx`**：一个 pane 的 `ConversationRoot` 渲染——memoize kit/host，调 `renderConversationRoot()` 捕获并渲染原生组件
+- **`src/client/PaneWorkspace.tsx`**：注册为 `conversation` 槽的**低优先级影子**（slot shadow），只管分屏树/focus/拖拽调度；单窗格=渲染 ConversationRoot（current），分屏=分屏树（每 pane 渲染 ConversationRoot（pane session））
 - **`src/client/pane-layout-store.ts`**：分屏树 store（split/close/ratio/splitPaneToSide），插件模块单例，跨会话共享
 
-无任何核心修改：`conversation.panes` 缝、`SessionScope` 座位、`useSessionById` 等补丁能力全部不再需要。
+**每个 pane 渲染真正的 `ConversationRoot`**（原生对话界面），布局 100% 原生：hero、workspace picker、composer、消息流、测量、width handles 全部保留，只是 session 不同。无任何核心修改，无补丁。
 
 ## 安装
 
