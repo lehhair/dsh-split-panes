@@ -24,6 +24,7 @@ import type {
   SlotScopeAdapter, StandardSourceBinding, StoreInstanceLike,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import { PaneRoot } from './PaneRoot.tsx'
+import { storeInstanceOf } from './pane-store.ts'
 
 /** The ledger face a pane host reads (the live SlotRegistry, type-erased). */
 export interface PaneLedger {
@@ -107,9 +108,6 @@ export function paneAbsentBinding(ctx: {
   return { key: undefined, hooks, keyedHooks, props }
 }
 
-/** Store-instance cache: handle identity → scope key → instance. */
-const storeInstances = new WeakMap<object, Map<string, StoreInstanceLike>>()
-
 /** The cell one entry occupies under its slot's kind (mirrors SlotCore). */
 function cellOf(kind: string, entry: StoredEntry): string {
   if (kind === 'keyed') return entry.options.key ?? ''
@@ -117,22 +115,11 @@ function cellOf(kind: string, entry: StoredEntry): string {
   return ''
 }
 
-/** Resolve (and cache) one entry store's instance for one scope key. */
+/** Resolve one entry store's instance for one scope key (shared with the core). */
 function storeOf(entry: StoredEntry, binding: ScopedStandardSourceBinding | undefined): StoreInstanceLike | undefined {
   const handle = entry.store as unknown as { create?: (scopeKey?: string) => StoreInstanceLike } | undefined
   if (handle === undefined || typeof handle.create !== 'function') return undefined
-  const key = binding?.key ?? ''
-  let perHandle = storeInstances.get(handle as unknown as object)
-  if (perHandle === undefined) {
-    perHandle = new Map()
-    storeInstances.set(handle as unknown as object, perHandle)
-  }
-  let instance = perHandle.get(key)
-  if (instance === undefined) {
-    instance = binding === undefined ? handle.create() : handle.create(key)
-    perHandle.set(key, instance)
-  }
-  return instance
+  return storeInstanceOf(handle, binding?.key)
 }
 
 /**

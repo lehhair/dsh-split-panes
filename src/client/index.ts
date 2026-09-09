@@ -37,6 +37,7 @@ import { SplitPaneButton } from './SplitPaneButton.tsx'
 import { SplitVerticalButton } from './SplitVerticalButton.tsx'
 import { ClosePaneButton } from './ClosePaneButton.tsx'
 import { createPaneRootSource } from './root-binding.ts'
+import { installStoreSharing } from './pane-store.ts'
 import { resolveSessionIdFromRow, SESSION_DRAG_TYPE, sessionRowOf } from './session-row.ts'
 import { createPaneLayoutStore, allLeaves, type PaneLayoutState } from './pane-layout-store.ts'
 import { en, zh, type PaneKey } from './locales.ts'
@@ -136,6 +137,9 @@ export function apply(ctx: ClientContext): void {
   }
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-panes: dictionaries')
+  // Store handles shared with core-rendered regions (e.g. the right sidebar's
+  // panel + its header-corner button) must resolve to ONE instance.
+  installStoreSharing(ctx)
 
   // The conversation occupant. Priority -1 keeps the stock ConversationRoot
   // registered at 0 (the pane renderer elects it inside each pane), and makes
