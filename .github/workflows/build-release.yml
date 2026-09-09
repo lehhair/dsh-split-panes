@@ -3,9 +3,10 @@
 # The plugin's devDependencies are `link:` into a local deepseek-harness
 # checkout (the plugin repo's build-time dependency source), so this workflow
 # checks out that harness and builds it before building the plugin. The harness
-# ref is PINNED to the 0.1.3-alpha.1 commit the plugin's source targets (the
-# same commit dsh-mobile/dsh-diff-viewer pin): harness master moves, and a
-# pinned build keeps releases reproducible.
+# ref is PINNED to the 0.1.5-alpha.1 commit the plugin's source targets: the
+# vendored slot renderer (src/client/vendor/renderer) is a verbatim copy of that
+# release and `pnpm run check` fails on any drift, so the pin must match the
+# vendor. Harness master moves; a pinned build keeps releases reproducible.
 #
 # Triggered on release publish (attach to that release) or manually.
 name: build-release
@@ -40,11 +41,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: deepseek-ai/deepseek-harness
-          # 0.1.3-alpha.1 master; the plugin's link: devDependencies resolve
-          # into this checkout at ../dsh2026/deepseek-harness/... — the layout
-          # this repo's pnpm-lock.yaml records. Pinned (harness master moves;
-          # a pinned build keeps releases reproducible).
-          ref: d347e703908d0406b7a7ef80e3a0e594d86b2215
+          # dsh-v0.1.5-alpha.1; the plugin's link: devDependencies resolve into
+          # this checkout at ../dsh2026/deepseek-harness/... — the layout this
+          # repo's pnpm-lock.yaml records. Pinned (harness master moves; a
+          # pinned build keeps releases reproducible).
+          ref: 5dda764ed3aa172535a7967b06ff95d9cbfe536a
           path: dsh2026/deepseek-harness
           fetch-depth: 1
 
