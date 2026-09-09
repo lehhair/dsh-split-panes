@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-/** Panes-plugin registration: shadows the conversation slot, registers the
-    header split/close buttons, waits for owners' declarations, and owns the
-    shared pane tree. */
+/** Panes-plugin registration: occupies the conversation slot permanently
+    (the single-pane state is the tree with one leaf), registers the header
+    split/close buttons over the ONE shared pane tree, owns the global
+    shortcuts, and back-fills the side-bar drag payload. */
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent } from '@testing-library/react'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
@@ -10,7 +11,7 @@ import {
 } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { apply, inject } from '../src/client/index.ts'
-import { SESSION_DRAG_TYPE } from '../src/client/PaneWorkspace.tsx'
+import { SESSION_DRAG_TYPE } from '../src/client/session-row.ts'
 
 usePinnedBrowserLanguages('zh-CN')
 
@@ -29,15 +30,12 @@ async function bench() {
   }, { current: false })
   // Declare the layout-owned conversation slot (single, session-maybe) and —
   // as ui-conversation's ConversationRoot does in production — the child
-  // slots (session, header, composer) it owns. The plugin shadows the root
-  // but relies on these declarations + occupant registrations surviving.
+  // slots (session, header, composer) it owns. The plugin wins the slot but
+  // relies on these declarations + occupant registrations surviving.
   await runtime.root.declare({
     'conversation': { kind: 'single', scope: 'session-maybe' },
   }, (_props: { renderSlot?: unknown }) => null)
   await runtime.slots.inject('conversation' as never, function* () {
-    // The stock ConversationRoot (declared by ui-conversation): declares
-    // the child slots it owns. The header's OWN children (the actions row)
-    // are declared by the stock ConversationSessionHeader below.
     yield runtime.slots.register({
       name: 'conversation',
       children: {
@@ -63,36 +61,73 @@ async function bench() {
 
 describe('ui-panes apply', () => {
   it('declares only the services it uses', () => {
-    expect(inject).toEqual(['slots', 'locale', 'sessions', 'uiSession', 'workspaces'])
+    expect(inject).toEqual(['slots', 'locale', 'sessions', 'uiSession'])
   })
 
-  it('registers the workspace takeover and the header split/close buttons', async () => {
+  it('occupies the conversation slot permanently and owns one shared pane tree', async () => {
     const runtime = await bench()
     await runtime.mount({ inject: [...inject], apply })
     await runtime.flush()
-    // The conversation slot holds the stock stub entry (declared by the
-    // bench, priority 0) PLUS the plugin's takeover at a lower priority —
-    // the shadow that makes the plugin win while loaded and returns the
-    // stock rendering on unload. Entries sort by priority ascending, so the
-    // plugin's (-1) is first.
+    // The plugin's occupant is always registered; the stock ConversationRoot
+    // stays on the ledger (the pane renderer elects it inside each pane).
     const conversation = runtime.slots.entries('conversation')
     expect(conversation).toHaveLength(2)
     const panesEntry = conversation.find(e => (e as { options?: { priority?: number } }).options?.priority === -1)
     expect(panesEntry).toBeDefined()
-    // Entries sort by priority ascending: the plugin's takeover (-1) wins
-    // while loaded; the stock stub (default priority 0) survives for the
-    // unload fallback.
-    expect(conversation[0]).toBe(panesEntry)
-    const stockEntry = conversation.find(e => e !== panesEntry)
-    const stockPriority = (stockEntry as { options?: { priority?: number } }).options?.priority
-    expect(stockPriority).toBeUndefined()
-    // The whole panes plugin surfaces share the ONE pane tree (module
-    // singleton) — registered beside the stub actions entry.
+    expect(runtime.slots.entriesOfSlot('conversation')[0]).toBe(panesEntry)
+
+    const splitButton = runtime.slots.entries('conversation.session.header.actions' as never)
+      .find(e => (e as { options?: { id?: string } }).options?.id === 'panes-split')
+    const entry = splitButton as unknown as { inject?: (...args: unknown[]) => Record<string, unknown> } | undefined
+    const ops = entry?.inject
+      ? entry.inject('s1') as unknown as {
+        splitFocused: (d: 'horizontal' | 'vertical') => void
+        closeFocused: () => void
+        hasSplit: () => boolean
+      }
+      : null
+    expect(ops).not.toBeNull()
+    expect(ops?.hasSplit()).toBe(false)
     const buttons = runtime.slots.entries('conversation.session.header.actions' as never)
       .filter(e => (e as { options: { id?: string } }).options.id?.startsWith('panes-') ?? false)
     expect(buttons).toHaveLength(3)
     const ids = buttons.map(e => (e as { options: { id?: string } }).options.id).sort()
     expect(ids).toEqual(['panes-close', 'panes-split', 'panes-split-v'])
+
+    runtime.sessions.open('s1' as SessionId)
+    ops!.splitFocused('horizontal')
+    await runtime.flush()
+    expect(ops!.hasSplit()).toBe(true)
+    // The first pane keeps the current selection; the new pane is a fresh
+    // new-conversation placeholder.
+    ops!.closeFocused()
+    await runtime.flush()
+    expect(ops!.hasSplit()).toBe(false)
+    await runtime.dispose()
+  })
+
+  it('splits and closes through the global shortcuts', async () => {
+    const runtime = await bench()
+    await runtime.mount({ inject: [...inject], apply })
+    await runtime.flush()
+    runtime.sessions.open('s1' as SessionId)
+    fireEvent.keyDown(window, { key: 'ArrowRight', ctrlKey: true, shiftKey: true })
+    await runtime.flush()
+    const splitButton = runtime.slots.entries('conversation.session.header.actions' as never)
+      .find(e => (e as { options?: { id?: string } }).options?.id === 'panes-split')
+    const ops = (splitButton as unknown as { inject: (...args: unknown[]) => { hasSplit: () => boolean } })
+      .inject('s1')
+    expect(ops.hasSplit()).toBe(true)
+    // Editing targets stay exempt (mod+shift+arrows select text there).
+    const input = document.createElement('input')
+    document.body.appendChild(input)
+    input.focus()
+    fireEvent.keyDown(input, { key: 'w', ctrlKey: true, shiftKey: true })
+    expect(ops.hasSplit()).toBe(true)
+    input.remove()
+    fireEvent.keyDown(window, { key: 'w', ctrlKey: true, shiftKey: true })
+    await runtime.flush()
+    expect(ops.hasSplit()).toBe(false)
     await runtime.dispose()
   })
 

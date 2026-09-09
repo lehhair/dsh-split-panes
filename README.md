@@ -2,39 +2,39 @@
 
 # dsh-split-panes **暂时不可用！不patch核心难以实现，还在开发测试中**
 
-DSH 对话分屏插件（PiUI 风格）：把信息流分成多个可独立操作的窗格，每个窗格绑定自己的会话——分屏/层叠、四向拖拽分配、侧边栏会话拖入、单行融合 header。信息流本体完全复用原生渲染（重新托管核心注册的原生组件），插件只做容器与交互。
+DSH 对话分屏插件（PiUI 风格）：把信息流分成多个可独立操作的窗格，每个窗格绑定自己的会话——分屏/层叠、四向拖拽分配、侧边栏会话拖入。**每个窗格都跑核心自己的渲染器**，插件只提供容器、焦点路由与交互。
 
-**免补丁**：不再依赖任何核心源码补丁。插件通过核心**公开**的 slot 注册 / ui-session / sessions-service 面组装出按 id 渲染路径，直接运行于官方核心。
+**免补丁**：不修改、不重打包核心。插件把核心的 slot 渲染器（`createSlotRenderer`）**逐字节 vendor** 进仓库，给每个 pane 构造一个 **pane 作用域的 host**（`SlotRendererHost` 是公开接口），于是核心的 outlet 用这个 pane 的 session binding 渲染——header / 消息流 / composer / hero 全部是核心代码。
 
 ## 功能
 
-- **分屏组合**：header 操作行分屏按钮 + `mod+shift+方向键`（左右/上下），`mod+shift+w` 关闭窗格；分隔条可拖拽、可键盘调节（比例 0.1–0.9）
-- **每窗格独立会话**：每个窗格绑定各自的会话；分屏是**纯视图操作**——新窗格是"新建对话"占位（不创建 host 会话），在占位窗格里开始对话时才真正创建会话并绑定到该窗格，互不干扰
-- **侧边栏拖拽分配**：把侧边栏会话拖到窗格上——中心落下替换该窗格会话，四条边缘落下向该侧分屏（被拖会话进新窗格，焦点跟随）；拖拽通道完全插件化（capture dragstart 反查）
-- **原生视觉**：未分屏时逐字节等同原生（无边框、无 chrome）；分屏后窗格带焦点蓝边框（选中 `deepseek-500` / 未选中灰）；header 单行化 + PiUI 渐变 + 内容留白
+- **分屏组合**：header 分屏按钮 + `mod+shift+方向键`（左右/上下），`mod+shift+w` 关闭窗格；分隔条可拖拽、可键盘调节（比例 0.1–0.9）
+- **每窗格独立会话**：每个 pane 绑定各自的会话；分屏是**纯视图操作**——新窗格是"新建对话"占位（不创建 host 会话），在占位里选工作区才真正创建会话并绑定到该 pane
+- **焦点即全局选中（OpenCode 模型）**：点 pane → 它成为焦点并让全局选中跟随（侧边栏高亮同步）；点侧边栏会话 → **改的是焦点 pane 的内容**，其余 pane 保持 pinned
+- **侧边栏拖拽分配**：拖会话到 pane 中心=替换，四条边缘=向该侧分屏（拖拽通道完全插件化：capture 阶段反查行 DOM）
+- **原生视觉**：单窗格时逐字节等同原生（无边框无 chrome）；分屏后焦点 pane 带品牌蓝边框
 
 ## 效果预览
 
 ![dsh-split-panes 分屏效果](screenshots/split-panes.png)
 
-## 架构（免补丁，纯扩展）
+## 为什么需要 vendor 核心渲染器
 
-核心（≥ 0.1.3-alpha.1）的渲染器只把**当前选择**会话的 standard-source binding 提供给 slot 组件，**没有提供按任意 id 渲染的扩展点**（`ScopeBindingContext`/host 实例/renderArea 的内容 dispatch 都是包私有或不渲染内容）。插件因此**不自建渲染层、不复刻布局**，而是**捕获原生 `ConversationRoot` 组件，喂给它 pane 会话的数据与 dispatch**——每个 pane 渲染真正的原生对话界面。
+核心**没有**"按任意 session id 渲染"的扩展点（详见 `docs/ARCHITECTURE.md` §2：`ScopeProvider` 硬编码 `adapter.current`，binding context 私有、`installScope` 一次性、`renderSlot()` 只允许 `'root'`、`SlotScope` 是封闭联合）。
 
-| 核心公开面 | 插件用途 |
-|---|---|
-| `ctx.uiSession.adapter.resolve(id)` | 按 pane 会话解析其**完整 standard-source binding**（session/conversation/input hooks、projection keyed hooks、inputActions props）——by-id 数据底座 |
-| `ctx.sessions.sessionOf(scopeCtx)` | 触发 pane 会话的 `open()`（幂等、与 stage 无关），拉取历史窗口与实时事件流 |
-| `ctx.slots.entries('conversation')` | 捕获 **`ConversationRoot` 条目**（component + inject + locale）——**原生对话界面本身**，含 hero/workspace picker/composer/测量/width handles |
-| `ConversationRoot 条目的 inject` | **复用原生 `selectWorkspace`**（工作区选择 + draft 迁移）与 `hooks.composerBlock`——不需要自己实现 |
+但核心**公开了渲染器的输入契约** `SlotRendererHost`：
 
-- **`src/client/kit.ts`**：`buildPaneKit` 把 pane binding 的裸 observable 绑定成本插件的 uSES selector hooks（与官方 renderer 的 bind 契约一致，含 absent/maybe hook 语义），并触发会话打开
-- **`src/client/render-host.tsx`**：捕获 `ctx.slots.entries()` 的条目，为每窗格重组其 kit + inject + store + 子槽 dispatch（`renderSlot`/`renderSlotChain`），包错误边界
-- **`src/client/PaneConversation.tsx`**：一个 pane 的 `ConversationRoot` 渲染——memoize kit/host，调 `renderConversationRoot()` 捕获并渲染原生组件
-- **`src/client/PaneWorkspace.tsx`**：注册为 `conversation` 槽的**低优先级影子**（slot shadow），只管分屏树/focus/拖拽调度；单窗格=渲染 ConversationRoot（current），分屏=分屏树（每 pane 渲染 ConversationRoot（pane session））
-- **`src/client/pane-layout-store.ts`**：分屏树 store（split/close/ratio/splitPaneToSide），插件模块单例，跨会话共享
+```
+renderRoot(host)
+ ├─ HostContext.Provider(host)
+ ├─ RootStandardProvider        ← 读 host.root
+ ├─ ScopeProvider               ← 读 host.scope('session').current   ★ 决定 binding
+ └─ RootOutlet                  ← 读 host.entriesOfSlot('root')
+```
 
-**每个 pane 渲染真正的 `ConversationRoot`**（原生对话界面），布局 100% 原生：hero、workspace picker、composer、消息流、测量、width handles 全部保留，只是 session 不同。无任何核心修改，无补丁。
+**host 由调用方提供**。所以每个 pane 用一个合成 host（`scope('session')` 指向本 pane 的 binding、`entriesOfSlot('root')` 返回一个只有一行 `renderSlot('conversation')` 的合成 root、`entriesOfSlot('conversation')` 过滤掉插件自己的影子），核心渲染器就把原生会话渲染进这个 pane 了。
+
+`createSlotRenderer` 没有从已发布的 `@deepseek-ai/dsh-client-ui-renderer` 导出（npm 包只带 `lib/`），所以渲染器源码 vendor 进 `src/client/vendor/renderer/`，由 `scripts/sync-renderer-vendor.mjs` 同步、`tests/renderer-vendor.spec.ts` 逐字节守门。
 
 ## 安装
 
@@ -43,46 +43,53 @@ git clone https://github.com/lehhair/dsh-split-panes.git
 dsh plugin --profile web add link:/path/to/dsh-split-panes
 ```
 
-重启 `dsh web` 即可使用（右上角/header 出现分屏按钮）。
+重启 `dsh web` 即可使用（会话 header 出现分屏按钮）。要求核心 `>= 0.1.5-alpha.1`。
 
 ## 使用
 
-- **分屏**：点 header 的分屏按钮，或拖侧边栏会话到对话区域边缘
-- **替换**：拖侧边栏会话到窗格中心，替换该窗格会话
-- **新建**：分屏出的新窗格是当前工作区的新建对话（相互独立），直接在窗格内开始对话
+- **分屏**：点会话 header 的分屏按钮，或 `mod+shift+←/→`（左右）、`mod+shift+↓`（上下）
+- **切会话**：点 pane 让它成为焦点，然后在侧边栏点另一个会话 → 焦点 pane 换成它
+- **替换**：拖侧边栏会话到窗格中心
+- **新建**：分屏出的新窗格是当前工作区的新建对话，直接在窗格内选工作区开始
 - **关闭**：窗格 header 的关闭按钮或 `mod+shift+w`
 
 ## 开发
 
 ```sh
-pnpm install        # devDeps link 到 ../dsh2026/deepseek-harness（DSH 源码，需先构建其 client 包）
-pnpm run check      # typecheck + test + build
+pnpm install          # devDeps link 到 ../dsh2026/deepseek-harness（核心源码）
+pnpm run check        # vendor 漂移检查 + typecheck + test + build
 ```
 
-- `src/client/`：浏览器半（槽位注册、分屏树 store、kit、render-host、拖拽、全局 chrome）
+- `src/client/`：浏览器半（slot 注册、分屏树 store、pane host facade、拖拽、焦点路由）
+- `src/client/vendor/renderer/`：核心 slot 渲染器的逐字节副本（不要手改，用 `pnpm run vendor:renderer`）
 - `src/index.ts`：node 半（空）
 - 构建产物 `lib/client.js` 由 harness 以 `/plugins/<id>/client.js` 提供
 
-测试通过 vitest，resolve 到核心 `../dsh2026/deepseek-harness` 的 **src**（vitest.config.ts 的 alias），因此跑的是核心源码、非构建产物，能即时反映上游 API 变化。
+测试跑 vitest，resolve 到核心 `../dsh2026/deepseek-harness` 的 **src**（`vitest.config.ts` 的 alias），因此跑的是核心源码、非构建产物，能即时反映上游 API 变化。
+
+真机验证脚本（本地）：`.dev/scenario.mjs` 用 Playwright 驱动真实浏览器完成"开会话 → 分屏 → 切侧边栏 → 点回第一个 pane"，输出截图与 console 错误。
 
 ## 布局
 
 ```
 src/client/
-  kit.ts                # 每窗格标准 kit（binding → selector hooks + ensure open）
-  render-host.tsx       # 捕获原生条目 + 每窗格 inject/store/子槽 dispatch + 错误边界
-  PaneBody.tsx          # 一个 pane 的原生会话正文（header + view + composer）
-  PaneWorkspace.tsx     # conversation 槽影子：分屏树/单窗格、拖拽 drop、快捷键、focus
-  pane-layout-store.ts  # 分屏树 store（split/close/ratio/splitPaneToSide）
-  PaneDropOverlay.tsx   # 拖拽 drop-zone 高亮（ref 驱动）
-  SplitContainer.tsx    # 分隔条容器（拖拽/键盘调节）
-  SplitPaneButton.tsx / SplitVerticalButton.tsx / ClosePaneButton.tsx  # header 按钮
-  PaneGlobal.module.css # 插件全局 chrome（单行 header、渐变、内容留白、侧边栏融合）
+  pane-host.ts          # 合成 SlotRendererHost（root 槽 / pane scope adapter / store / abdication）
+  PaneRoot.tsx          # 合成 root entry：一行 renderSlot('conversation')
+  PaneConversation.tsx  # 一个 pane：binding + host + 核心渲染器
+  root-binding.ts       # root standard-source binding（按 ctx.inject 反应式补齐 workspaces/resources）
+  pane-session.ts       # 非当前会话的窗口打开（session.open）
+  session-row.ts        # 侧边栏会话行的 drag / click 反查
+  PaneWorkspace.tsx     # 分屏树 / 焦点路由 / 拖拽 / 快捷键（无对话布局）
+  pane-layout-store.ts  # 分屏树 store（模块单例）
+  SplitContainer.tsx    # 分隔条容器
+  PaneDropOverlay.tsx   # 拖拽 drop-zone 高亮
+  SplitPaneButton.tsx / SplitVerticalButton.tsx / ClosePaneButton.tsx
+  vendor/renderer/      # 核心渲染器逐字节副本（bind.ts / bindings.tsx / scoped-slots.tsx）
 ```
 
 ## License
 
-BSD-3-Clause
+BSD-3-Clause（与核心渲染器副本同许可）
 
 ## 友情链接 / Friend Links
 

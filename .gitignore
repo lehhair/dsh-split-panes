@@ -1,3 +1,9 @@
 node_modules/
 *.log
 .DS_Store
+
+# Local verification harness (dev-only): published dsh runtime, isolated
+# profile state, and browser screenshots. See docs/ARCHITECTURE.md §12.
+.devruntime/
+.devhome/
+.dev/shots/

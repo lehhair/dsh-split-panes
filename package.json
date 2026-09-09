@@ -1,7 +1,7 @@
 {
   "name": "@dsh-external/dsh-split-panes",
-  "description": "DSH split-pane conversation plugin: PiUI-style multi-pane conversation surface — split/stack panes, per-pane sessions, sidebar session drag & drop, single-row fused header. No core patch required: panes re-host the native conversation components through the core's public slot and session APIs.",
-  "version": "0.4.0",
+  "description": "DSH split-pane conversation plugin: PiUI-style multi-pane conversation surface — split/stack panes, per-pane sessions, sidebar session drag & drop, single-row fused header. No core patch required: each pane runs the core's own slot renderer against a pane-scoped host.",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -26,7 +26,9 @@
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
     "test": "vitest run",
-    "check": "pnpm run typecheck && pnpm run test && pnpm run build"
+    "vendor:renderer": "node scripts/sync-renderer-vendor.mjs",
+    "vendor:renderer:check": "node scripts/sync-renderer-vendor.mjs --check",
+    "check": "pnpm run vendor:renderer:check && pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "dsh": {
     "bundle": {
@@ -70,10 +72,12 @@
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "^18.3.1",
+    "@types/use-sync-external-store": "^1.5.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tsdown": "^0.22.2",
     "typescript": "^5.9.3",
+    "use-sync-external-store": "1.2.0",
     "vitest": "^4.1.1",
     "lightningcss": "^1.30.0",
     "@testing-library/react": "^16.1.0",

@@ -1,37 +1,23 @@
 /**
- * Pane-workspace entry (the plugin's replacement for the `conversation`
- * slot, declared by ui-layout, session-maybe scope): renders the STOCK
- * conversation column as a single pane, or as a split-pane tree once the
- * user splits. Splitting CLONES the single-pane conversation into two
- * panes — the original keeps the current session, the new pane starts a
- * FRESH conversation — and EVERY pane re-hosts the FULL native conversation
- * UNCHANGED, including its own header (crumbs, tabs, header actions): a
- * session pane reuses the stock header with the pane actions (split H/V /
- * close) in its actions row. The new-conversation surface (no session, or a
- * BLANK session — the stock hero hides its header) gets the plugin's
- * new-conversation header (title + split H/V + close while split) in BOTH
- * the single full-bleed state and split panes.
+ * Pane-workspace entry: this plugin's occupant of the `conversation` slot
+ * (declared by ui-layout, scope session-maybe).
  *
- * This package replaces ui-conversation's ConversationRoot (single slot,
- * lowest priority), so the conversation column becomes the pane workspace.
- * Every pane renders the native conversation via the CAPTURED slot
- * occupants (the same registered components the stock shell renders), bound
- * to the pane's OWN session through the core's by-id standard-source
- * adapter (`ctx.uiSession.adapter.resolve`) — see kit.ts / render-host.ts.
- * The render delegate is supplied through this entry's inject face (the
- * apply closure owns ctx and the live slot ledger); the component itself is
- * a pure layout, as before.
+ * The plugin ALWAYS occupies that slot: the single full-bleed state is the
+ * pane tree with one leaf, so one rendering path covers both states (no
+ * takeover/release transition, no dual behavior to keep in sync). Each pane
+ * renders the native conversation through the vendored core renderer bound to
+ * the pane's own session — see PaneConversation.tsx.
  *
- * Absent this plugin (or while this entry is unloaded) the stock
- * ConversationRoot renders verbatim: the takeover is a slot shadow, not a
- * core change.
+ * FOCUS MODEL (OpenCode): the focused pane is the current selection's mirror.
+ *   - clicking a pane focuses it and, when it holds a session, selects that
+ *     session globally (side-bar highlight follows);
+ *   - clicking a side-bar session binds the FOCUSED pane (other panes keep
+ *     their pinned sessions);
+ *   - the single-leaf state renders the global current selection, so with one
+ *     pane nothing has to be routed at all.
  *
- * The split tree is GLOBAL viewing state (one module-owned instance, not a
- * per-session slot store): switching sessions never rebuilds it. The
- * CURRENT selection tracks the FOCUSED pane: focusing a pane opens its
- * session (the side-bar highlights it), clicking a session in the side-bar
- * (or starting a new one) binds the focused pane, and every other pane
- * keeps its pinned session — so several panes may show the SAME session.
+ * This component owns layout, focus and drag & drop only — no conversation
+ * markup, no session data.
  */
 import { useEffect, useRef } from 'react'
 import type { DragEvent as ReactDragEvent, ReactNode } from 'react'
@@ -44,14 +30,10 @@ import { allLeaves, createPaneLayoutStore } from './pane-layout-store.ts'
 import { SplitContainer } from './SplitContainer.tsx'
 import { IconSplitHorizontal16, IconSplitVertical16 } from './icons.tsx'
 import { PaneDropOverlay, resolveDropZone, type DropZone, type PaneDropOverlayHandle } from './PaneDropOverlay.tsx'
+import { SESSION_DRAG_TYPE, sessionRowOf } from './session-row.ts'
 import css from './PaneWorkspace.module.css'
 
-/**
- * HTML5 data-transfer type carrying a dragged session id (written by the
- * side-bar session rows; read here on dragover/drop). The mime string is the
- * cross-package channel — no import between the two plugin packages.
- */
-export const SESSION_DRAG_TYPE = 'application/x-dsh-session'
+export { SESSION_DRAG_TYPE } from './session-row.ts'
 
 /**
  * The shared pane tree's action set: the frame-baked actions of the pane
@@ -65,22 +47,16 @@ export interface PaneWorkspaceInjected {
   openSession: (sessionId: SessionId) => void
   /**
    * Split a pane and bind the NEW pane to an INDEPENDENT fresh conversation:
-   * splitting the single pane anchors the current selection (the original
-   * pane becomes that session); inside the split tree the new pane stays a
-   * NEW-CONVERSATION placeholder (null session) — the stock hero then starts
-   * its own conversation.
+   * splitting anchors the original pane to the current selection; inside the
+   * split tree the new pane stays a new-conversation placeholder (null
+   * session) — the stock hero then starts its own conversation.
    */
   splitWithNew: (
     paneId: string,
     direction: 'horizontal' | 'vertical',
     anchor: SessionId | null,
   ) => void
-  /**
-   * Split the FOCUSED pane (header-affordance route): resolves the focused
-   * pane id + anchor from the shared pane tree and splits it. Splitting the
-   * single full-bleed pane anchors the current selection.
-   * @param direction - split direction.
-   */
+  /** Split the FOCUSED pane (header-affordance route). */
   splitFocused: (direction: 'horizontal' | 'vertical') => void
   /** Close the FOCUSED pane (header-affordance route); no-op on a single pane. */
   closeFocused: () => void
@@ -92,10 +68,16 @@ export interface PaneWorkspaceInjected {
   paneActions: PaneLayoutActions
   /**
    * Render one pane's native conversation body for an explicit session. The
-   * delegate owns the per-session kit / captured-occupant host; the workspace
-   * layouts it. `sessionId` undefined is the new-conversation hero.
+   * delegate owns the per-session renderer host; the workspace layouts it.
+   * `sessionId` undefined is the new-conversation hero.
    */
-  renderPane: (sessionId: SessionId | undefined, key: string) => ReactNode
+  renderPane: (sessionId: SessionId | undefined, paneId: string) => ReactNode
+  /**
+   * Resolve the session a side-bar row element stands for (the click-routing
+   * channel: `sessions.open()` does not report a selection change when the
+   * clicked session is already current).
+   */
+  resolveRowSession: (row: HTMLElement) => SessionId | null
 }
 
 /** Full composed props: runtime + shared-store inject + locale. */
@@ -162,17 +144,10 @@ function HeroHeader(props: {
 /**
  * Session drag & drop wiring for one pane (PiUI drop model): while a session
  * is dragged over the pane, a ref-driven overlay highlights the target zone —
- * CENTER replaces the pane's session, the four EDGE halves split to that
- * side with the dropped session landing in the NEW pane (focus stays on the
- * original). High-frequency dragover events update only the tiny overlay
- * through its imperative handle, never the pane subtree.
- * @param leaf - this pane's leaf.
- * @param single - true on the single full-bleed surface: edge splits anchor
- *   the current selection and a center drop OPENS the dragged session; in
- *   the split tree the original pane keeps itself and a center drop binds
- *   the pane's session slot.
- * @param current - the global current selection (single-pane split anchor).
- * @param actions - the shared pane tree's actions.
+ * CENTER replaces the pane's session, the four EDGE halves split to that side
+ * with the dropped session landing in the NEW pane (focus follows the drop).
+ * High-frequency dragover events update only the tiny overlay through its
+ * imperative handle, never the pane subtree.
  */
 function usePaneDrop(
   leaf: PaneLeaf,
@@ -240,23 +215,26 @@ function usePaneDrop(
   }
 }
 
-/** One split leaf: focus frame + (new-conversation header | stock header) + scoped conversation. */
+/** One split leaf: focus frame + (new-conversation header | stock header) + pane body. */
 function PaneFrame(props: {
   leaf: PaneLeaf
   focused: boolean
   current: SessionId | undefined
-  isNewConversation: boolean
-  renderPane: (sessionId: SessionId | undefined, key: string) => ReactNode
+  blankIds: ReadonlySet<string>
+  renderPane: PaneWorkspaceProps['renderPane']
   actions: PaneLayoutActions
   openSession: PaneWorkspaceProps['openSession']
   splitWithNew: PaneWorkspaceProps['splitWithNew']
   t: PaneWorkspaceProps['t']
 }) {
   const {
-    leaf, focused, current, isNewConversation,
-    renderPane, actions, openSession, splitWithNew, t,
+    leaf, focused, current, blankIds, renderPane, actions, openSession, splitWithNew, t,
   } = props
   const { onDragOver, onDragLeave, onDrop, overlay } = usePaneDrop(leaf, false, current, actions, openSession)
+  // The stock shell hides its header for a blank session (the hero owns the
+  // surface), so such a pane would lose its split/close affordances; the
+  // plugin's own new-conversation header stands in for both states.
+  const needsOwnHeader = leaf.sessionId === null || blankIds.has(leaf.sessionId)
   return (
     <div
       className={css.pane}
@@ -269,7 +247,7 @@ function PaneFrame(props: {
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      {isNewConversation && (
+      {needsOwnHeader && (
         <HeroHeader
           paneId={leaf.id}
           split
@@ -285,12 +263,12 @@ function PaneFrame(props: {
   )
 }
 
-/** The single full-bleed surface: the stock conversation verbatim plus the drop zone. */
+/** The single full-bleed surface: the current session's conversation verbatim. */
 function SinglePane(props: {
   leaf: PaneLeaf
   current: SessionId | undefined
   showHeroHeader: boolean
-  renderPane: (sessionId: SessionId | undefined, key: string) => ReactNode
+  renderPane: PaneWorkspaceProps['renderPane']
   actions: PaneLayoutActions
   openSession: PaneWorkspaceProps['openSession']
   splitWithNew: PaneWorkspaceProps['splitWithNew']
@@ -300,6 +278,9 @@ function SinglePane(props: {
     leaf, current, showHeroHeader, renderPane, actions, openSession, splitWithNew, t,
   } = props
   const { onDragOver, onDragLeave, onDrop, overlay } = usePaneDrop(leaf, true, current, actions, openSession)
+  // The single pane follows the global selection: no leaf session is pinned
+  // (closing back to one pane clears it), so a side-bar switch always lands
+  // here without any routing.
   return (
     <div className={css.singleSurface} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       {showHeroHeader && (
@@ -312,39 +293,35 @@ function SinglePane(props: {
           t={t}
         />
       )}
-      {renderPane(leaf.sessionId ?? current, leaf.id)}
+      {renderPane(current, leaf.id)}
       {overlay}
     </div>
   )
 }
 
 /**
- * Render the conversation as a full-bleed pane, or as the split-pane tree
- * once the user splits. Each session pane is the FULL stock conversation
- * (its own header included) inside a focus-grabbing frame; new-conversation
- * panes get the plugin's new-conversation header.
+ * Render the conversation column: one full-bleed pane, or the split tree.
  * @param props - composed slot props (see PaneWorkspaceProps).
- * @returns the pane surface wrapping the stock conversation column.
+ * @returns the pane surface wrapping the native conversation.
  */
 export function PaneWorkspace({
   usePaneStore, paneActions, useSessions,
-  openSession, splitWithNew, renderPane, t,
+  openSession, splitWithNew, renderPane, resolveRowSession, t,
 }: PaneWorkspaceProps) {
   const state = usePaneStore((s: PaneLayoutState) => s)
   const current = useSessions((s: { current?: SessionId | undefined }) => s.current)
-  // A BLANK session is a brand-new conversation: the stock UI renders it as
-  // the hero (header hidden), so the single pane shows the new-conversation
-  // header for it too (the hook is unconditional — hook order must stay
-  // stable across the leaf/split branches).
-  const currentIsBlank = useSessions((s: { byId: Record<string, { blank?: boolean }> }) =>
-    current !== undefined ? (s.byId[current as string]?.blank ?? false) : false)
-  const showSingleHeroHeader = current === undefined || currentIsBlank
+  // Blank sessions render the stock hero (header hidden), so both the single
+  // surface and each split pane need the plugin's own new-conversation header
+  // there. The selector returns a joined id list — value-stable, so it only
+  // re-renders when the blank set actually changes.
+  const blankKey = useSessions((s: { ids?: readonly string[]; byId: Record<string, { blank?: boolean }> }) =>
+    (s.ids ?? []).filter(id => s.byId[id]?.blank === true).join(','))
+  const blankIds = new Set(blankKey === '' ? [] : blankKey.split(','))
 
-  // Route a SELECTION CHANGE to the focused pane: the side-bar's session
-  // click (or the hero's start action) binds that pane, while every other
-  // pane keeps its pinned session. The previous-id ref distinguishes a real
-  // change from the initial mount (the split's original pane is already
-  // bound; the fresh pane must stay on the new-conversation hero).
+  // Route a SELECTION CHANGE to the focused pane: a side-bar click (or any
+  // other selection writer) binds the focused pane while every other pane
+  // keeps its pinned session. A session started inside a pane already bound
+  // and focused itself, so this lands as a no-op there.
   const prevCurrent = useRef(current)
   const stateRef = useRef(state)
   stateRef.current = state
@@ -358,60 +335,33 @@ export function PaneWorkspace({
     if (paneId !== undefined) paneActions.setPaneSession(paneId, current)
   }, [current, paneActions])
 
-  // Split-pane keybindings (mod+shift+arrows split, mod+shift+w close).
-  // Live state and actions ride refs so the listener binds once. Editable
-  // targets are exempt: mod+shift+arrows are text-selection shortcuts there.
-  const latest = useRef({ state, paneActions, current, splitWithNew })
-  latest.current = { state, paneActions, current, splitWithNew }
+  // Side-bar click channel: `sessions.open()` notifies even when the clicked
+  // session is ALREADY current (no selection change to observe), so the
+  // focused pane is bound here, at capture time, before the row's own handler
+  // runs. Only the split state needs routing — one pane renders `current`.
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (!(event.metaKey || event.ctrlKey) || !event.shiftKey) return
-      const target = event.target as HTMLElement | null
-      if (target !== null
-        && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
-      const latestNow = latest.current
-      const paneId = latestNow.state.focusedPaneId ?? allLeaves(latestNow.state.root)[0]?.id
+    const onClick = (event: MouseEvent): void => {
+      const row = sessionRowOf(event.target)
+      if (row === null) return
+      const tree = stateRef.current
+      if (tree.root.type === 'leaf') return
+      const sessionId = resolveRowSession(row)
+      if (sessionId === null) return
+      const paneId = tree.focusedPaneId ?? allLeaves(tree.root)[0]?.id
       if (paneId === undefined) return
-      // The anchor: splitting the SINGLE pane keeps the current session (or
-      // stays fresh without one); splitting INSIDE the tree never anchors —
-      // a new-conversation pane stays new, a session pane keeps its session.
-      const anchor: SessionId | null = latestNow.state.root.type === 'leaf'
-        ? (latestNow.current ?? null)
-        : null
-      switch (event.key) {
-        case 'ArrowRight':
-          event.preventDefault()
-          latestNow.splitWithNew(paneId, 'horizontal', anchor)
-          break
-        case 'ArrowDown':
-          event.preventDefault()
-          latestNow.splitWithNew(paneId, 'vertical', anchor)
-          break
-        case 'w':
-        case 'W':
-          event.preventDefault()
-          latestNow.paneActions.closePane(paneId)
-          break
-      }
+      paneActions.setPaneSession(paneId, sessionId)
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => { window.removeEventListener('keydown', onKeyDown) }
-  }, [])
+    document.addEventListener('click', onClick, true)
+    return () => { document.removeEventListener('click', onClick, true) }
+  }, [paneActions, resolveRowSession])
 
-  if (state.root.type === 'leaf') {
-    // Single pane: the stock conversation rendered VERBATIM inside the
-    // transparent drop surface (the only wrapper of our own — it carries the
-    // drag & drop that creates the FIRST split). The new-conversation states
-    // (no session, or a BLANK session — the stock UI renders both as the
-    // header-less hero) gain the new-conversation header, so a fresh
-    // conversation can split from the start. The header renders FULL-BLEED
-    // like the native one (no pane frame): unsplit, the hero must look
-    // exactly like a plain session.
+  const root = state.root
+  if (root.type === 'leaf') {
     return (
       <SinglePane
-        leaf={state.root}
+        leaf={root}
         current={current}
-        showHeroHeader={showSingleHeroHeader}
+        showHeroHeader={current === undefined || blankIds.has(current)}
         renderPane={renderPane}
         actions={paneActions}
         openSession={openSession}
@@ -424,26 +374,23 @@ export function PaneWorkspace({
   return (
     <div className={css.host}>
       <SplitContainer
-        node={state.root}
+        node={root}
         dividerLabel={t('pane.split.divider')}
         onSetRatio={(splitId, ratio) => { paneActions.setRatio(splitId, ratio) }}
-        renderLeaf={leaf => {
-          const isNewConversation = leaf.sessionId === null
-          return (
-            <PaneFrame
-              key={leaf.id}
-              leaf={leaf}
-              focused={state.focusedPaneId === leaf.id}
-              current={current}
-              isNewConversation={isNewConversation}
-              renderPane={renderPane}
-              actions={paneActions}
-              openSession={openSession}
-              splitWithNew={splitWithNew}
-              t={t}
-            />
-          )
-        }}
+        renderLeaf={leaf => (
+          <PaneFrame
+            key={leaf.id}
+            leaf={leaf}
+            focused={state.focusedPaneId === leaf.id}
+            current={current}
+            blankIds={blankIds}
+            renderPane={renderPane}
+            actions={paneActions}
+            openSession={openSession}
+            splitWithNew={splitWithNew}
+            t={t}
+          />
+        )}
       />
     </div>
   )

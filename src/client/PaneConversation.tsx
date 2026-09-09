@@ -1,50 +1,84 @@
 /**
- * PaneConversation: the re-hosted native ConversationRoot for ONE pane.
+ * PaneConversation: ONE pane's native conversation, rendered by the core's
+ * own slot renderer running against a pane-scoped host.
  *
- * Given a pane session id, this builds the pane's standard kit (kit.ts, the
- * by-id twin of the framework's current-selection kit) and a pane render
- * host (render-host.tsx, the by-id twin of the framework's slot dispatch),
- * then renders the STOCK ConversationRoot component captured from the
- * 'conversation' slot — the SAME component the shell renders for the
- * current session, bound to THIS pane's session through its own kit.
+ * The renderer instance is the vendored core `createSlotRenderer()` product
+ * (see `vendor/renderer/README.md`); the host is `createPaneHost` with this
+ * pane's session binding. The renderer's root outlet dispatches 'conversation',
+ * which elects the STOCK ConversationRoot (the pane host filters this
+ * plugin's own shadow out of its ledger view) under the pane's scope — so the
+ * native header, session body, composer chain and hero render here exactly as
+ * they do for the current session in an unmodified shell.
  *
- * This is the pure-extension path (no core patch, no layout
- * re-implementation): ConversationRoot owns its own chrome — the strict
- * session header (crumbs, tabs, actions), the session body (chat/trajectory
- * view), the composer card, the hero (brand mark, workspace picker, agent
- * preset), the measurements and width handles — all rendered verbatim,
- * just fed this pane's binding and child dispatch instead of the
- * current-selection ones.
- *
- * The kit and host are MEMOIZED per pane session, so hooks, store
- * instances, and inject faces stay identity-stable across renders (the
- * production renderer's own caches).
+ * The host is memoized per (deps, pane binding): the renderer caches inject
+ * faces, store instances and hooks per host identity, so a stable host is
+ * what keeps component subscriptions from churning.
  */
-import { memo, useMemo } from 'react'
-import type { ReactNode } from 'react'
-import type { PaneContext } from './kit.ts'
-import { buildPaneKit } from './kit.ts'
-import { createPaneRenderHost } from './render-host.tsx'
+import { memo, useEffect, useMemo, type ReactNode } from 'react'
+import type { Context } from '@deepseek-ai/cordis'
+import type { HostObservable, StandardSourceBinding, StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
+import { createPaneHost, paneAbsentBinding, type PaneLedger } from './pane-host.ts'
+import { ensureSessionOpen } from './pane-session.ts'
+import { createSlotRenderer } from './vendor/renderer/scoped-slots.tsx'
 
-/** One pane's re-hosted native conversation (the stock ConversationRoot). */
-export const PaneConversation = memo(function PaneConversation(props: {
-  ctx: PaneContext
-  sessionId: string | undefined
-  key: string
-}): ReactNode {
-  const { ctx, sessionId } = props
-  // Memoize the kit and host per pane session: the kit's selector hooks and
-  // the host's occupant/store/inject caches must be identity-stable, or
-  // every render would re-mint subscriptions and lose per-session state
-  // (view selection, draft mirrors, scroll memory).
-  const kit = useMemo(() => buildPaneKit(ctx, sessionId as never), [ctx, sessionId])
-  const host = useMemo(
-    () => createPaneRenderHost(ctx.slots, kit, ctx.locale),
-    [ctx.slots, kit, ctx.locale],
-  )
+/** The renderer product, created once (it is stateless between renders). */
+const RENDERER = createSlotRenderer()
 
-  // Render the stock ConversationRoot verbatim: the component owns its own
-  // layout (hero vs active, header/body/composer, measurements, width
-  // handles) — we only supply this pane's binding and child dispatch.
-  return host.renderConversationRoot()
+/** Everything a pane needs that is shared across panes of one plugin load. */
+export interface PaneRenderDeps {
+  /** Client root context (slots / uiSession / locale / sessions). */
+  readonly ctx: Context
+  /** Live slot ledger, type-erased. */
+  readonly ledger: PaneLedger
+  /** Root standard-source binding observable. */
+  readonly rootSource: HostObservable<StandardSourceBinding>
+  /** Entries never elected in a pane (this plugin's own conversation shadow). */
+  readonly excluded: (entry: StoredEntry) => boolean
+  /** Entry wrapper (inject provenance); identity-stable per (entry, pane). */
+  readonly wrapEntry: (entry: StoredEntry, paneId: string) => StoredEntry
+}
+
+/** One pane's props. */
+export interface PaneConversationProps {
+  readonly deps: PaneRenderDeps
+  /** Pane session; undefined renders the native new-conversation surface. */
+  readonly sessionId: string | undefined
+  /** Pane identity (stable across session switches of the same pane). */
+  readonly paneId: string
+}
+
+/**
+ * Render one pane's native conversation.
+ * @param props - deps + pane identity + session.
+ * @returns the pane's conversation subtree.
+ */
+export const PaneConversation = memo(function PaneConversation({
+  deps, sessionId, paneId,
+}: PaneConversationProps): ReactNode {
+  const { ctx } = deps
+  const binding = sessionId === undefined
+    ? undefined
+    : ctx.uiSession.adapter.resolve(sessionId)
+
+  // Pinned panes are not staged by the core; open their window explicitly.
+  useEffect(() => { ensureSessionOpen(ctx, sessionId) }, [ctx, sessionId])
+
+  const host = useMemo(() => createPaneHost({
+    ledger: deps.ledger,
+    adapter: ctx.uiSession.adapter,
+    locale: ctx.locale,
+    root: deps.rootSource,
+    binding,
+    absent: binding === undefined ? paneAbsentBinding(ctx) : undefined,
+    excluded: deps.excluded,
+    wrap: entry => deps.wrapEntry(entry, paneId),
+    onCrash: (key, entry, error) => {
+      console.error(`[dsh-split-panes] pane ${paneId} occupant crashed in '${key}':`, error, entry.options)
+    },
+  }), [deps, binding, paneId, ctx])
+
+  // The core renderer keys the session-maybe incarnation itself (adoption →
+  // remount on a different session), so no extra key is needed here; the host
+  // identity changes with the binding, which is what re-derives every seat.
+  return RENDERER.renderRoot(host, {})
 })

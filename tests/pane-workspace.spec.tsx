@@ -75,6 +75,9 @@ function mount(initialCurrent: string | undefined = 's1') {
     if (paneId !== undefined) instance.actions.closePane(paneId)
   })
   const hasSplit = vi.fn((): boolean => instance.getSnapshot().root.type !== 'leaf')
+  // Side-bar click channel: the harness resolves a row element to a session id.
+  let rowSession: string | null = null
+  const resolveRowSession = vi.fn(() => rowSession as never)
   const usePaneStore = hookOf(instance)
   // Mutable current for the selection-change binding test.
   let current: string | undefined = initialCurrent
@@ -98,6 +101,7 @@ function mount(initialCurrent: string | undefined = 's1') {
       closeFocused={closeFocused}
       hasSplit={hasSplit}
       renderPane={renderPane}
+      resolveRowSession={resolveRowSession}
       t={t}
     />
   )
@@ -117,6 +121,8 @@ function mount(initialCurrent: string | undefined = 's1') {
       currentRef.current = next
       view.rerender(element())
     },
+    setRowSession: (next: string | null) => { rowSession = next },
+    resolveRowSession,
     get: () => ({ current }),
   }
 }
@@ -200,6 +206,32 @@ describe('PaneWorkspace', () => {
     expect(original.sessionId).toBe('s1')
   })
 
+  it('a side-bar click binds the FOCUSED pane even when the session is already current', () => {
+    const { instance, setRowSession } = mount()
+    const id = instance.getSnapshot().root.id
+    act(() => { instance.actions.splitPane(id, 'horizontal', 's1' as never) })
+    const root = instance.getSnapshot().root
+    if (root.type !== 'split') throw new Error('expected a split')
+    // The fresh pane is focused; clicking the ALREADY-current session in the
+    // side-bar must still bind it there (no selection change to observe).
+    setRowSession('s1')
+    const row = document.createElement('div')
+    row.setAttribute('role', 'treeitem')
+    row.setAttribute('draggable', 'true')
+    document.body.appendChild(row)
+    act(() => { fireEvent.click(row) })
+    expect(instance.getSnapshot().root).toMatchObject({
+      second: { type: 'leaf', sessionId: 's1' },
+    })
+    // Clicking a non-session element routes nothing.
+    const plain = document.createElement('div')
+    document.body.appendChild(plain)
+    act(() => { fireEvent.click(plain) })
+    expect(instance.getSnapshot().focusedPaneId).toBe(root.second.id)
+    row.remove()
+    plain.remove()
+  })
+
   it('focusing a pane opens its session (the side-bar highlight follows the active pane)', () => {
     const { instance, openSession } = mount()
     const id = instance.getSnapshot().root.id
@@ -255,28 +287,6 @@ describe('PaneWorkspace', () => {
     expect(screen.queryByRole('separator')).toBeNull()
     // split (2 panes) + the surviving single pane re-render.
     expect(renderPane).toHaveBeenCalledTimes(3)
-  })
-
-  it('mod+shift+ArrowRight splits the focused pane; mod+shift+w closes it', () => {
-    const { instance } = mount()
-    fireEvent.keyDown(window, { key: 'ArrowRight', ctrlKey: true, shiftKey: true })
-    const root = instance.getSnapshot().root
-    expect(root.type).toBe('split')
-    const first = root.type === 'split' ? root.first : null
-    if (first === null || first.type !== 'leaf') throw new Error('expected a leaf')
-    expect(first.sessionId).toBe('s1')
-    fireEvent.keyDown(window, { key: 'w', ctrlKey: true, shiftKey: true })
-    expect(instance.getSnapshot().root.type).toBe('leaf')
-  })
-
-  it('ignores mod+shift keys while an editable element is focused', () => {
-    const { instance } = mount()
-    const input = document.createElement('input')
-    document.body.appendChild(input)
-    input.focus()
-    fireEvent.keyDown(input, { key: 'ArrowRight', ctrlKey: true, shiftKey: true })
-    expect(instance.getSnapshot().root.type).toBe('leaf')
-    input.remove()
   })
 
   it('dragging a session over a pane highlights the drop zone (center vs edge)', () => {
