@@ -6,6 +6,10 @@
  * the shell's rendering semantics.
  *
  * Fix by running: node scripts/sync-renderer-vendor.mjs
+ *
+ * Line endings are normalized before comparing: git's autocrlf rewrites the
+ * working copy on Windows, so a byte comparison would flag a cosmetic
+ * CRLF/LF difference on exactly the platform that most often rewrites files.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -16,10 +20,13 @@ const vendored = fileURLToPath(new URL('../src/client/vendor/renderer/', import.
 
 const FILES = ['bind.ts', 'bindings.tsx', 'scoped-slots.tsx'] as const
 
+/** Normalize platform line endings so a CRLF working copy matches LF source. */
+const normalize = (text: string): string => text.replace(/\r\n/g, '\n')
+
 describe('vendored core renderer', () => {
   it.each(FILES)('%s is byte-identical to the core source', (file) => {
-    const upstream = readFileSync(`${core}${file}`, 'utf8')
-    const copy = readFileSync(`${vendored}${file}`, 'utf8')
+    const upstream = normalize(readFileSync(`${core}${file}`, 'utf8'))
+    const copy = normalize(readFileSync(`${vendored}${file}`, 'utf8'))
     expect(copy).toBe(upstream)
   })
 

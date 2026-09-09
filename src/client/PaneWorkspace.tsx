@@ -427,7 +427,11 @@ export function PaneWorkspace({
   }
 
   return (
-    <div className={css.host}>
+    // data-slot="conversation.panes" is the CROSS-PLUGIN split-state marker
+    // (introduced by this plugin, consumed by dsh-home-ui's "exclude split
+    // panes" header rule). It is a plain DOM attribute on this container —
+    // no slot is declared or registered, and the core never reads it.
+    <div className={css.host} data-slot="conversation.panes">
       <SplitContainer
         node={root}
         dividerLabel={t('pane.split.divider')}

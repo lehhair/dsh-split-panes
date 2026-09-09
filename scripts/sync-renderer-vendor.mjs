@@ -29,14 +29,17 @@ const OUT = join(PLUGIN_ROOT, 'src/client/vendor/renderer')
 /** Files copied verbatim from the core renderer. */
 export const VENDORED_FILES = ['bind.ts', 'bindings.tsx', 'scoped-slots.tsx']
 
+/** Normalize platform line endings (git autocrlf rewrites Windows copies). */
+const normalize = (text) => text.replace(/\r\n/g, '\n')
+
 /** Read one vendored pair: [core source, plugin copy]. */
 export function vendorPair(file) {
   return {
     core: join(CORE, file),
     copy: join(OUT, file),
     read: () => ({
-      upstream: readFileSync(join(CORE, file), 'utf8'),
-      vendored: existsSync(join(OUT, file)) ? readFileSync(join(OUT, file), 'utf8') : undefined,
+      upstream: normalize(readFileSync(join(CORE, file), 'utf8')),
+      vendored: existsSync(join(OUT, file)) ? normalize(readFileSync(join(OUT, file), 'utf8')) : undefined,
     }),
   }
 }

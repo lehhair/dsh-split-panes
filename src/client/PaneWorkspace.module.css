@@ -57,7 +57,9 @@
 
 /* Fullscreen: one pane fills the whole column while the split tree stays
    intact (leaving fullscreen restores every pane exactly). No frame chrome —
-   the focused pane IS the column, so a border would read as a seam. */
+   the focused pane IS the column, so a border would read as a seam. The
+   doubled class keeps this at the same specificity as .pane[data-focused]
+   and wins by being later, so the focused pane shows no blue ring. */
 .fullscreenHost {
   position: relative;
   display: flex;
@@ -67,7 +69,7 @@
   min-height: 0;
 }
 
-.paneFullscreen {
+.pane.paneFullscreen {
   border-color: transparent;
   border-radius: 0;
   background: transparent;
