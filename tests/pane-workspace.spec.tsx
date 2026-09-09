@@ -105,9 +105,8 @@ function mount(initialCurrent: string | undefined = 's1') {
       t={t}
     />
   )
-  const view = render(element())
+  let view = render(element())
   return {
-    ...view,
     instance,
     bodies,
     renderPane,
@@ -115,11 +114,22 @@ function mount(initialCurrent: string | undefined = 's1') {
     splitWithNew,
     splitFocused,
     closeFocused,
+    get container() { return view.container },
     rerender: () => { view.rerender(element()) },
     setCurrent: (next: string | undefined) => {
       current = next
       currentRef.current = next
       view.rerender(element())
+    },
+    /**
+     * Unmount + mount with a new selection: the core's conversation slot is
+     * session-maybe, so a selection change remounts the whole workspace.
+     */
+    remount: (next: string | undefined) => {
+      current = next
+      currentRef.current = next
+      view.unmount()
+      view = render(element())
     },
     setRowSession: (next: string | null) => { rowSession = next },
     resolveRowSession,
@@ -204,6 +214,25 @@ describe('PaneWorkspace', () => {
     if (newPane.type !== 'leaf' || original.type !== 'leaf') throw new Error('expected leaves')
     expect(newPane.sessionId).toBe('s2')
     expect(original.sessionId).toBe('s1')
+  })
+
+  it('a selection change rebinds the focused pane across a workspace REMOUNT', () => {
+    // The core's conversation slot is session-maybe: selecting another session
+    // remounts this component. The routing must survive that (a mount-local
+    // "previous current" ref does not — that was the "new session does
+    // nothing" bug).
+    const { instance, remount } = mount()
+    const id = instance.getSnapshot().root.id
+    act(() => { instance.actions.splitPane(id, 'horizontal', 's1' as never) })
+    const root = instance.getSnapshot().root
+    if (root.type !== 'split') throw new Error('expected a split')
+    act(() => { instance.actions.focusPane(root.first.id) })
+    act(() => { remount('s2') })
+    const after = instance.getSnapshot().root
+    if (after.type !== 'split') throw new Error('expected a split')
+    // The focused pane adopted the new selection; the other pane kept its pin.
+    expect(after.first).toMatchObject({ type: 'leaf', sessionId: 's2' })
+    expect(after.second).toMatchObject({ type: 'leaf', sessionId: null })
   })
 
   it('a side-bar click binds the FOCUSED pane even when the session is already current', () => {

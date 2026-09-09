@@ -318,21 +318,27 @@ export function PaneWorkspace({
     (s.ids ?? []).filter(id => s.byId[id]?.blank === true).join(','))
   const blankIds = new Set(blankKey === '' ? [] : blankKey.split(','))
 
-  // Route a SELECTION CHANGE to the focused pane: a side-bar click (or any
-  // other selection writer) binds the focused pane while every other pane
-  // keeps its pinned session. A session started inside a pane already bound
-  // and focused itself, so this lands as a no-op there.
-  const prevCurrent = useRef(current)
+  // Route the GLOBAL SELECTION to the focused pane: a side-bar click (or any
+  // other selection writer, including "new session") binds the focused pane
+  // while every other pane keeps its pinned session.
+  //
+  // The check is IDEMPOTENT on purpose — it compares the focused pane's own
+  // session against the selection instead of tracking a previous value. The
+  // core's conversation slot is session-maybe, so every selection change
+  // REMOUNTS this component (SessionMaybeEntry's incarnation epoch); a
+  // mount-local "previous current" ref would be initialized to the new value
+  // and the effect would never fire.
   const stateRef = useRef(state)
   stateRef.current = state
   useEffect(() => {
-    if (current === prevCurrent.current) return
-    prevCurrent.current = current
     if (current === undefined) return
     const tree = stateRef.current
     if (tree.root.type === 'leaf') return
     const paneId = tree.focusedPaneId ?? allLeaves(tree.root)[0]?.id
-    if (paneId !== undefined) paneActions.setPaneSession(paneId, current)
+    if (paneId === undefined) return
+    const focused = allLeaves(tree.root).find(leaf => leaf.id === paneId)
+    if (focused === undefined || focused.sessionId === current) return
+    paneActions.setPaneSession(paneId, current)
   }, [current, paneActions])
 
   // Side-bar click channel: `sessions.open()` notifies even when the clicked
