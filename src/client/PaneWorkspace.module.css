@@ -55,6 +55,24 @@
   border-color: var(--dsw-static-deepseek-500);
 }
 
+/* Fullscreen: one pane fills the whole column while the split tree stays
+   intact (leaving fullscreen restores every pane exactly). No frame chrome —
+   the focused pane IS the column, so a border would read as a seam. */
+.fullscreenHost {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.paneFullscreen {
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+}
+
 /* New-conversation pane title bar: the hero has no stock header, so the pane
    shows a minimal bar aligned with the session panes' header baseline. In
    the SINGLE full-bleed state it sits at the column top (12px default pad,

@@ -170,12 +170,15 @@ const PANE_ROOT_ENTRY = {
 | 选中变化（命令面板/程序化） | 同上，绑定焦点 pane | `useEffect([current])` |
 | 拖会话到中心/四边 | 替换 / 向该侧分屏 | `usePaneDrop` |
 | 在占位 pane 里选工作区新建 | 新会话落回**发起它的 pane** | `wrapPaneEntry` 包住原生 `selectWorkspace`，成功后把新会话绑回该 pane 并聚焦 |
+| 全屏 / 退出全屏 | 只显示该 pane，**树不动** | store 的 `fullscreenPaneId`；按钮在 pane header，`Esc` 退出 |
 
 **为什么需要 capture click 通道**：`sessions.open(id)` 在 id 已经是 current 时也会 `notifyNow()`，但快照的 `current` 值不变 → 选择器不重渲染 → 监听不到"再次点了同一个会话"。capture 阶段先于行自身的 handler 绑定焦点 pane，覆盖这个 case。单窗格状态渲染 `current`，不需要任何路由。
 
 **焦点语义的两个方向**
 - 点 pane → current 跟随（侧边栏高亮跟着焦点走）
 - 点侧边栏 → 只改焦点 pane（其它 pane 不动）
+
+**全屏**：`fullscreenPaneId` 只影响**渲染**（只渲染那个 leaf，走 `.fullscreenHost` 全宽），`root` 树一个字节都不动，所以退出全屏就是回到原来的分屏比例与所有 pane 的会话；`closePane` 关掉全屏 pane、或树塌成单 leaf 时自动清空该状态；在全屏里再分屏也会自动退出全屏（因为要看到两个 pane）。单 pane 本身就是全宽，按钮此时不渲染。
 
 ---
 
@@ -258,7 +261,7 @@ src/client/
   session-row.ts        # 侧边栏行的 drag/click 反查 + dataTransfer 类型
   PaneWorkspace.tsx     # 分屏树 / 焦点路由 / 拖拽 / 快捷键
   pane-layout-store.ts  # 分屏树 store（模块单例）
-  SplitContainer.tsx / PaneDropOverlay.tsx / *Button.tsx / icons.tsx / locales.ts
+  SplitContainer.tsx / PaneDropOverlay.tsx / *Button.tsx（含 FullscreenPaneButton）/ icons.tsx / locales.ts
   vendor/renderer/      # 核心渲染器逐字节副本 + README（出处与同步说明）
 scripts/sync-renderer-vendor.mjs
 tests/

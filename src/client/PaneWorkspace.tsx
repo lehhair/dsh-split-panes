@@ -28,7 +28,7 @@ import { IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PaneLayoutState, PaneLeaf } from './pane-layout-store.ts'
 import { allLeaves, createPaneLayoutStore } from './pane-layout-store.ts'
 import { SplitContainer } from './SplitContainer.tsx'
-import { IconSplitHorizontal16, IconSplitVertical16 } from './icons.tsx'
+import { IconFullscreen16, IconFullscreenExit16, IconSplitHorizontal16, IconSplitVertical16 } from './icons.tsx'
 import { PaneDropOverlay, resolveDropZone, type DropZone, type PaneDropOverlayHandle } from './PaneDropOverlay.tsx'
 import { SESSION_DRAG_TYPE, sessionRowOf } from './session-row.ts'
 import css from './PaneWorkspace.module.css'
@@ -62,6 +62,13 @@ export interface PaneWorkspaceInjected {
   closeFocused: () => void
   /** Whether the shared pane tree is currently split (close button visibility). */
   hasSplit: () => boolean
+  /**
+   * Show the FOCUSED pane alone while the tree stays intact, or leave
+   * fullscreen. No-op on a single pane (already full-bleed).
+   */
+  toggleFullscreen: () => void
+  /** Whether the focused pane is the one currently shown fullscreen. */
+  isFullscreen: () => boolean
   /** Selector hook over the SHARED split tree (global viewing state). */
   usePaneStore: <S>(selector: (state: PaneLayoutState) => S) => S
   /** The shared split tree's bound actions. */
@@ -86,16 +93,17 @@ export type PaneWorkspaceProps =
   & InjectFace<PaneWorkspaceInjected>
   & PropsLocale<'panes'>
 
-/** The new-conversation header: title + split H/V (+ close while split). */
+/** The new-conversation header: title + split H/V + fullscreen + close. */
 function HeroHeader(props: {
   paneId: string
   split: boolean
+  fullscreen: boolean
   current: SessionId | undefined
   actions: PaneLayoutActions
   splitWithNew: PaneWorkspaceProps['splitWithNew']
   t: PaneWorkspaceProps['t']
 }) {
-  const { paneId, split, current, actions, splitWithNew, t } = props
+  const { paneId, split, fullscreen, current, actions, splitWithNew, t } = props
   const doSplit = (direction: 'horizontal' | 'vertical') => {
     // Splitting the SINGLE full-bleed hero anchors the current selection
     // (the original pane becomes that session; a no-session hero anchors
@@ -125,6 +133,18 @@ function HeroHeader(props: {
         >
           <IconSplitVertical16 />
         </button>
+        {split && (
+          <button
+            type="button"
+            className={css.heroButton}
+            aria-label={fullscreen ? t('pane.fullscreen.exit') : t('pane.fullscreen')}
+            title={fullscreen ? t('pane.fullscreen.exit') : t('pane.fullscreen')}
+            aria-pressed={fullscreen}
+            onClick={() => { actions.toggleFullscreen(paneId) }}
+          >
+            {fullscreen ? <IconFullscreenExit16 /> : <IconFullscreen16 />}
+          </button>
+        )}
         {split && (
           <button
             type="button"
@@ -219,6 +239,8 @@ function usePaneDrop(
 function PaneFrame(props: {
   leaf: PaneLeaf
   focused: boolean
+  /** Shown alone: full-bleed, no frame chrome, tree untouched. */
+  fullscreen?: boolean | undefined
   current: SessionId | undefined
   blankIds: ReadonlySet<string>
   renderPane: PaneWorkspaceProps['renderPane']
@@ -228,7 +250,7 @@ function PaneFrame(props: {
   t: PaneWorkspaceProps['t']
 }) {
   const {
-    leaf, focused, current, blankIds, renderPane, actions, openSession, splitWithNew, t,
+    leaf, focused, fullscreen = false, current, blankIds, renderPane, actions, openSession, splitWithNew, t,
   } = props
   const { onDragOver, onDragLeave, onDrop, overlay } = usePaneDrop(leaf, false, current, actions, openSession)
   // The stock shell hides its header for a blank session (the hero owns the
@@ -237,8 +259,9 @@ function PaneFrame(props: {
   const needsOwnHeader = leaf.sessionId === null || blankIds.has(leaf.sessionId)
   return (
     <div
-      className={css.pane}
+      className={fullscreen ? `${css.pane} ${css.paneFullscreen}` : css.pane}
       data-focused={focused || undefined}
+      data-fullscreen={fullscreen || undefined}
       onPointerDown={() => {
         actions.focusPane(leaf.id)
         if (leaf.sessionId !== null) openSession(leaf.sessionId)
@@ -251,6 +274,7 @@ function PaneFrame(props: {
         <HeroHeader
           paneId={leaf.id}
           split
+          fullscreen={fullscreen}
           current={current}
           actions={actions}
           splitWithNew={splitWithNew}
@@ -287,6 +311,7 @@ function SinglePane(props: {
         <HeroHeader
           paneId={leaf.id}
           split={false}
+          fullscreen={false}
           current={current}
           actions={actions}
           splitWithNew={splitWithNew}
@@ -362,6 +387,30 @@ export function PaneWorkspace({
   }, [paneActions, resolveRowSession])
 
   const root = state.root
+  // Fullscreen shows ONE pane full-bleed; the tree (and every other pane's
+  // session) stays exactly as it was, so leaving fullscreen restores the split.
+  const fullscreenLeaf = state.fullscreenPaneId === null
+    ? null
+    : allLeaves(root).find(leaf => leaf.id === state.fullscreenPaneId) ?? null
+  if (fullscreenLeaf !== null) {
+    return (
+      <div className={css.fullscreenHost}>
+        <PaneFrame
+          leaf={fullscreenLeaf}
+          focused
+          fullscreen
+          current={current}
+          blankIds={blankIds}
+          renderPane={renderPane}
+          actions={paneActions}
+          openSession={openSession}
+          splitWithNew={splitWithNew}
+          t={t}
+        />
+      </div>
+    )
+  }
+
   if (root.type === 'leaf') {
     return (
       <SinglePane

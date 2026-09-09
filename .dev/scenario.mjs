@@ -64,7 +64,10 @@ const facts = () => page.evaluate(() => {
 const steps = []
 const run = async (name, fn) => {
   steps.push(`--- ${name}`)
-  try { await fn() } catch (e) { steps.push(`STEP FAILED: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`) }
+  try { await fn() } catch (e) {
+    const detail = String(e).split('\n').map(l => l.trim()).filter(Boolean).slice(0, 6).join(' | ')
+    steps.push(`STEP FAILED: ${detail}`)
+  }
 }
 const snap = async (name) => {
   await page.screenshot({ path: `${SHOTS}/${label}-${name}.png` })
@@ -120,6 +123,27 @@ await run('6 start a conversation inside a placeholder pane', async () => {
   await page.locator('[role="menuitem"]').filter({ hasText: WORKSPACE }).first().click()
   await page.waitForTimeout(6000)
   await snap('6-new-in-placeholder')
+})
+
+await run('7 fullscreen the focused pane, then Escape back to the split', async () => {
+  // Dismiss any popover left open by step 6 (it would intercept the click).
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(1000)
+  const before = await facts()
+  // Blank-session panes keep the stock header mounted but hidden, so match a
+  // VISIBLE toggle (the plugin's own hero header carries one there).
+  const button = page.locator('[data-slot="conversation.session.header.actions"] [aria-label="窗格全屏"]:visible, [aria-label="窗格全屏"]:visible').first()
+  if (await button.count() === 0) throw new Error('fullscreen button not rendered')
+  // Dispatch directly: a live streaming session keeps re-laying-out the pane,
+  // so Playwright's stability wait never settles.
+  await button.evaluate(el => el.click())
+  await page.waitForTimeout(2500)
+  await snap('7-fullscreen')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(2500)
+  await snap('7-exit')
+  const after = await facts()
+  steps.push(`panes: before=${before.panes.length} after-exit=${after.panes.length} separators-after=${after.separators}`)
 })
 
 console.log(steps.join('\n'))

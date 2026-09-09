@@ -75,6 +75,15 @@ function mount(initialCurrent: string | undefined = 's1') {
     if (paneId !== undefined) instance.actions.closePane(paneId)
   })
   const hasSplit = vi.fn((): boolean => instance.getSnapshot().root.type !== 'leaf')
+  const toggleFullscreen = vi.fn((): void => {
+    const state = instance.getSnapshot()
+    const paneId = state.focusedPaneId ?? allLeaves(state.root)[0]?.id
+    if (paneId !== undefined) instance.actions.toggleFullscreen(paneId)
+  })
+  const isFullscreen = vi.fn((): boolean => {
+    const state = instance.getSnapshot()
+    return state.fullscreenPaneId !== null && state.fullscreenPaneId === state.focusedPaneId
+  })
   // Side-bar click channel: the harness resolves a row element to a session id.
   let rowSession: string | null = null
   const resolveRowSession = vi.fn(() => rowSession as never)
@@ -100,6 +109,8 @@ function mount(initialCurrent: string | undefined = 's1') {
       splitFocused={splitFocused}
       closeFocused={closeFocused}
       hasSplit={hasSplit}
+      toggleFullscreen={toggleFullscreen}
+      isFullscreen={isFullscreen}
       renderPane={renderPane}
       resolveRowSession={resolveRowSession}
       t={t}
@@ -214,6 +225,34 @@ describe('PaneWorkspace', () => {
     if (newPane.type !== 'leaf' || original.type !== 'leaf') throw new Error('expected leaves')
     expect(newPane.sessionId).toBe('s2')
     expect(original.sessionId).toBe('s1')
+  })
+
+  it('fullscreen renders the focused pane alone and exiting restores the split', () => {
+    const { instance } = mount()
+    const id = instance.getSnapshot().root.id
+    act(() => { instance.actions.splitPane(id, 'horizontal', 's1' as never) })
+    const root = instance.getSnapshot().root
+    if (root.type !== 'split') throw new Error('expected a split')
+    act(() => { instance.actions.focusPane(root.first.id) })
+    act(() => { instance.actions.toggleFullscreen(root.first.id) })
+    // One pane, full-bleed, no divider — but the tree is intact.
+    expect(screen.getAllByTestId(/feed-/)).toHaveLength(1)
+    expect(screen.queryByRole('separator')).toBeNull()
+    expect(document.querySelector('[data-fullscreen]')).not.toBeNull()
+    act(() => { instance.actions.toggleFullscreen(root.first.id) })
+    expect(screen.getAllByTestId(/feed-/)).toHaveLength(2)
+    expect(screen.getByRole('separator')).toBeTruthy()
+  })
+
+  it('a split new-conversation pane offers the fullscreen toggle', () => {
+    const { instance } = mount()
+    const id = instance.getSnapshot().root.id
+    act(() => { instance.actions.splitPane(id, 'horizontal', 's1' as never) })
+    const root = instance.getSnapshot().root
+    if (root.type !== 'split') throw new Error('expected a split')
+    expect(screen.getAllByRole('button', { name: en['pane.fullscreen'] })).toHaveLength(1)
+    act(() => { instance.actions.toggleFullscreen(root.second.id) })
+    expect(screen.getAllByRole('button', { name: en['pane.fullscreen.exit'] })).toHaveLength(1)
   })
 
   it('a selection change rebinds the focused pane across a workspace REMOUNT', () => {

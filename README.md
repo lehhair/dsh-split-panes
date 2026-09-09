@@ -9,6 +9,7 @@ DSH 对话分屏插件（PiUI 风格）：把信息流分成多个可独立操�
 ## 功能
 
 - **分屏组合**：header 分屏按钮 + `mod+shift+方向键`（左右/上下），`mod+shift+w` 关闭窗格；分隔条可拖拽、可键盘调节（比例 0.1–0.9）
+- **窗格全屏**：pane header 的全屏按钮把该窗格铺满整列，**分屏树原样保留**；再点一次或按 `Esc` 退出，精确回到分屏状态
 - **每窗格独立会话**：每个 pane 绑定各自的会话；分屏是**纯视图操作**——新窗格是"新建对话"占位（不创建 host 会话），在占位里选工作区才真正创建会话并绑定到该 pane
 - **焦点即全局选中（OpenCode 模型）**：点 pane → 它成为焦点并让全局选中跟随（侧边栏高亮同步）；点侧边栏会话 → **改的是焦点 pane 的内容**，其余 pane 保持 pinned
 - **侧边栏拖拽分配**：拖会话到 pane 中心=替换，四条边缘=向该侧分屏（拖拽通道完全插件化：capture 阶段反查行 DOM）
@@ -54,6 +55,7 @@ dsh plugin --profile web add link:/path/to/dsh-split-panes
 - **替换**：拖侧边栏会话到窗格中心
 - **新建**：分屏出的新窗格是当前工作区的新建对话，直接在窗格内选工作区开始
 - **关闭**：窗格 header 的关闭按钮或 `mod+shift+w`
+- **全屏**：点窗格 header 的全屏按钮（或全屏后按 `Esc` 退出）
 
 ## 开发
 
@@ -85,7 +87,7 @@ src/client/
   pane-layout-store.ts  # 分屏树 store（模块单例）
   SplitContainer.tsx    # 分隔条容器
   PaneDropOverlay.tsx   # 拖拽 drop-zone 高亮
-  SplitPaneButton.tsx / SplitVerticalButton.tsx / ClosePaneButton.tsx
+  SplitPaneButton.tsx / SplitVerticalButton.tsx / FullscreenPaneButton.tsx / ClosePaneButton.tsx
   vendor/renderer/      # 核心渲染器逐字节副本（bind.ts / bindings.tsx / scoped-slots.tsx）
 ```
 

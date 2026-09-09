@@ -36,6 +36,7 @@ import { PaneWorkspace, type PaneWorkspaceInjected } from './PaneWorkspace.tsx'
 import { SplitPaneButton } from './SplitPaneButton.tsx'
 import { SplitVerticalButton } from './SplitVerticalButton.tsx'
 import { ClosePaneButton } from './ClosePaneButton.tsx'
+import { FullscreenPaneButton } from './FullscreenPaneButton.tsx'
 import { createPaneRootSource } from './root-binding.ts'
 import { installStoreSharing } from './pane-store.ts'
 import { resolveSessionIdFromRow, SESSION_DRAG_TYPE, sessionRowOf } from './session-row.ts'
@@ -122,6 +123,15 @@ export function apply(ctx: ClientContext): void {
     if (paneId !== undefined) paneActions.closePane(paneId)
   }
   const hasSplit = (): boolean => paneTree().root.type !== 'leaf'
+  const toggleFullscreen = (): void => {
+    const state = paneTree()
+    const paneId = state.focusedPaneId ?? allLeaves(state.root)[0]?.id
+    if (paneId !== undefined) paneActions.toggleFullscreen(paneId)
+  }
+  const isFullscreen = (): boolean => {
+    const state = paneTree()
+    return state.fullscreenPaneId !== null && state.fullscreenPaneId === state.focusedPaneId
+  }
 
   const operations: PaneWorkspaceInjected = {
     openSession: (sessionId) => { ctx.sessions.open(sessionId) },
@@ -129,6 +139,8 @@ export function apply(ctx: ClientContext): void {
     splitFocused,
     closeFocused,
     hasSplit,
+    toggleFullscreen,
+    isFullscreen,
     usePaneStore,
     paneActions,
     renderPane: (sessionId, paneId) =>
@@ -166,10 +178,17 @@ export function apply(ctx: ClientContext): void {
     return () => { document.removeEventListener('dragstart', onDragStart, true) }
   }, 'ui-panes: session drag data')
 
-  // Global split-pane shortcuts (mod+shift+arrows split, mod+shift+w close).
-  // Editable targets are exempt: the chords are text-selection shortcuts there.
+  // Global split-pane shortcuts (mod+shift+arrows split, mod+shift+w close)
+  // plus Escape leaving pane fullscreen. Editable targets are exempt: the
+  // chords are text-selection shortcuts there.
   ctx.effect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      // Escape exits fullscreen wherever focus is (the pane owns the surface).
+      if (event.key === 'Escape' && paneTree().fullscreenPaneId !== null) {
+        event.preventDefault()
+        toggleFullscreen()
+        return
+      }
       if (!(event.metaKey || event.ctrlKey) || !event.shiftKey) return
       const target = event.target as HTMLElement | null
       if (target !== null
@@ -217,8 +236,19 @@ export function apply(ctx: ClientContext): void {
     } as never, SplitVerticalButton as never)
     yield ctx.slots.register({
       name: 'conversation.session.header.actions',
-      id: 'panes-close',
+      id: 'panes-fullscreen',
       order: 1002,
+      locale: NS,
+      inject: (): Pick<PaneWorkspaceInjected, 'toggleFullscreen' | 'hasSplit' | 'isFullscreen'> => ({
+        toggleFullscreen,
+        hasSplit,
+        isFullscreen,
+      }),
+    } as never, FullscreenPaneButton as never)
+    yield ctx.slots.register({
+      name: 'conversation.session.header.actions',
+      id: 'panes-close',
+      order: 1003,
       locale: NS,
       inject: (): Pick<PaneWorkspaceInjected, 'closeFocused' | 'hasSplit'> => ({
         closeFocused,

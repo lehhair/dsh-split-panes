@@ -44,6 +44,47 @@ describe('pane-layout-store', () => {
     expect(after.second).toMatchObject({ type: 'leaf', sessionId: 's2' })
   })
 
+  it('toggleFullscreen shows one pane alone and toggles back, tree intact', () => {
+    const { store, id } = boot()
+    store.actions.splitPane(id, 'horizontal', SESSION)
+    const before = store.getSnapshot().root
+    if (before.type !== 'split') throw new Error('expected a split')
+    // Focus the ORIGINAL pane, then expand it.
+    store.actions.focusPane(id)
+    store.actions.toggleFullscreen(id)
+    expect(store.getSnapshot().fullscreenPaneId).toBe(id)
+    expect(store.getSnapshot().focusedPaneId).toBe(id)
+    // The tree is untouched: leaving fullscreen restores both panes.
+    expect(store.getSnapshot().root).toBe(before)
+    store.actions.toggleFullscreen(id)
+    expect(store.getSnapshot().fullscreenPaneId).toBeNull()
+    expect(store.getSnapshot().root).toBe(before)
+  })
+
+  it('fullscreen is a no-op on a single pane and clears when its pane closes', () => {
+    const { store, id } = boot()
+    store.actions.toggleFullscreen(id)
+    expect(store.getSnapshot().fullscreenPaneId).toBeNull()
+    store.actions.splitPane(id, 'horizontal', SESSION)
+    const root = store.getSnapshot().root
+    if (root.type !== 'split') throw new Error('expected a split')
+    store.actions.toggleFullscreen(root.first.id)
+    expect(store.getSnapshot().fullscreenPaneId).toBe(root.first.id)
+    store.actions.closePane(root.first.id)
+    expect(store.getSnapshot().fullscreenPaneId).toBeNull()
+    expect(store.getSnapshot().root.type).toBe('leaf')
+  })
+
+  it('splitting out of fullscreen leaves fullscreen', () => {
+    const { store, id } = boot()
+    store.actions.splitPane(id, 'horizontal', SESSION)
+    const root = store.getSnapshot().root
+    if (root.type !== 'split') throw new Error('expected a split')
+    store.actions.toggleFullscreen(root.first.id)
+    store.actions.splitPane(root.first.id, 'vertical', SESSION)
+    expect(store.getSnapshot().fullscreenPaneId).toBeNull()
+  })
+
   it('re-splitting an already-bound pane keeps its session', () => {
     const { store, id } = boot()
     store.actions.splitPane(id, 'horizontal', SESSION)

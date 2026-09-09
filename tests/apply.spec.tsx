@@ -90,9 +90,9 @@ describe('ui-panes apply', () => {
     expect(ops?.hasSplit()).toBe(false)
     const buttons = runtime.slots.entries('conversation.session.header.actions' as never)
       .filter(e => (e as { options: { id?: string } }).options.id?.startsWith('panes-') ?? false)
-    expect(buttons).toHaveLength(3)
+    expect(buttons).toHaveLength(4)
     const ids = buttons.map(e => (e as { options: { id?: string } }).options.id).sort()
-    expect(ids).toEqual(['panes-close', 'panes-split', 'panes-split-v'])
+    expect(ids).toEqual(['panes-close', 'panes-fullscreen', 'panes-split', 'panes-split-v'])
 
     runtime.sessions.open('s1' as SessionId)
     ops!.splitFocused('horizontal')
@@ -118,6 +118,17 @@ describe('ui-panes apply', () => {
     const ops = (splitButton as unknown as { inject: (...args: unknown[]) => { hasSplit: () => boolean } })
       .inject('s1')
     expect(ops.hasSplit()).toBe(true)
+    // Fullscreen toggle + Escape leaving it.
+    const fullscreenButton = runtime.slots.entries('conversation.session.header.actions' as never)
+      .find(e => (e as { options?: { id?: string } }).options?.id === 'panes-fullscreen')
+    const full = (fullscreenButton as unknown as {
+      inject: (...args: unknown[]) => { toggleFullscreen: () => void; isFullscreen: () => boolean }
+    }).inject('s1')
+    expect(full.isFullscreen()).toBe(false)
+    full.toggleFullscreen()
+    expect(full.isFullscreen()).toBe(true)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(full.isFullscreen()).toBe(false)
     // Editing targets stay exempt (mod+shift+arrows select text there).
     const input = document.createElement('input')
     document.body.appendChild(input)

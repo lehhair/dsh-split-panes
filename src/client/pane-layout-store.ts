@@ -31,6 +31,11 @@ export type PaneNode = PaneLeaf | PaneSplit
 export interface PaneLayoutState {
   root: PaneNode
   focusedPaneId: string | null
+  /**
+   * Pane shown alone (full-bleed) while the split tree stays intact — exiting
+   * fullscreen restores the previous split exactly. Null = normal layout.
+   */
+  fullscreenPaneId: string | null
 }
 
 export type PaneActions = {
@@ -55,6 +60,11 @@ export type PaneActions = {
   setRatio: (draft: PaneLayoutState, splitId: string, ratio: number) => void
   /** Bind (or clear) one leaf's session — a started conversation lands here. */
   setPaneSession: (draft: PaneLayoutState, paneId: string, sessionId: SessionId | null) => void
+  /**
+   * Show one pane alone (full-bleed) without touching the tree, or leave
+   * fullscreen. Focusing rides along: the fullscreen pane is the active pane.
+   */
+  toggleFullscreen: (draft: PaneLayoutState, paneId: string) => void
 }
 
 /** One of the four drop sides a session can be dragged onto (center replaces). */
@@ -100,7 +110,7 @@ export function createPaneLayoutStore(): EngineStoreHandle<PaneLayoutState, Pane
   return defineStore<PaneLayoutState, PaneActions>({
     init: (): PaneLayoutState => {
       const id = genPaneId()
-      return { root: { type: 'leaf', id, sessionId: null }, focusedPaneId: id }
+      return { root: { type: 'leaf', id, sessionId: null }, focusedPaneId: id, fullscreenPaneId: null }
     },
 
     actions: {
@@ -112,6 +122,8 @@ export function createPaneLayoutStore(): EngineStoreHandle<PaneLayoutState, Pane
       splitPane: (d, paneId: string, direction: 'horizontal' | 'vertical', currentSessionId: SessionId | null) => {
         const leaf = findLeaf(d.root, paneId)
         if (leaf === null) return
+        // Splitting means the user wants to see both panes again.
+        d.fullscreenPaneId = null
         // The original pane keeps its session (defaulting to the current one
         // when it was the plain full-bleed pane); the new pane is the
         // NEW-CONVERSATION entry (null session) — the clone is fresh, not a
@@ -131,6 +143,8 @@ export function createPaneLayoutStore(): EngineStoreHandle<PaneLayoutState, Pane
       splitPaneToSide: (d, paneId: string, side: PaneSide, sessionId: SessionId | null, currentSessionId: SessionId | null) => {
         const leaf = findLeaf(d.root, paneId)
         if (leaf === null) return
+        // A drop that creates a pane leaves fullscreen (both panes must show).
+        d.fullscreenPaneId = null
         // The ORIGINAL pane keeps its own session (the single full-bleed pane
         // anchors the current selection; inside the split tree it stays
         // itself); the NEW pane shows the dropped session. Focus moves to
@@ -175,6 +189,9 @@ export function createPaneLayoutStore(): EngineStoreHandle<PaneLayoutState, Pane
         if (d.focusedPaneId === paneId || findLeaf(d.root, d.focusedPaneId ?? '') === null) {
           d.focusedPaneId = allLeaves(d.root)[0]?.id ?? null
         }
+        // A fullscreen pane that just closed (or a tree that collapsed to one
+        // pane) leaves fullscreen: one pane is already full-bleed.
+        if (d.fullscreenPaneId === paneId || d.root.type === 'leaf') d.fullscreenPaneId = null
       },
 
       setRatio: (d, splitId: string, ratio: number) => {
@@ -202,6 +219,18 @@ export function createPaneLayoutStore(): EngineStoreHandle<PaneLayoutState, Pane
           return { ...node, first, second }
         }
         d.root = set(d.root)
+      },
+
+      toggleFullscreen: (d, paneId: string) => {
+        if (d.fullscreenPaneId === paneId) {
+          d.fullscreenPaneId = null
+          return
+        }
+        if (findLeaf(d.root, paneId) === null) return
+        // Single pane is already full-bleed — nothing to expand.
+        if (d.root.type === 'leaf') return
+        d.fullscreenPaneId = paneId
+        d.focusedPaneId = paneId
       },
     },
   })
