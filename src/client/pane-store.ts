@@ -111,7 +111,9 @@ function slotKeys(nodes: readonly SlotNode[], into: Set<string> = new Set()): Se
  */
 export function installStoreSharing(ctx: Context): void {
   const patchDeclared = (): void => {
-    for (const key of slotKeys(ctx.slots.snapshot() as unknown as readonly SlotNode[])) {
+    const snapshot = (ctx.slots as { snapshot?: () => readonly SlotNode[] }).snapshot
+    if (typeof snapshot !== 'function') return
+    for (const key of slotKeys(snapshot.call(ctx.slots))) {
       for (const entry of ctx.slots.entries(key as never)) {
         const handle = (entry as { store?: object }).store
         if (handle !== undefined) memoizeHandle(handle)
@@ -135,11 +137,13 @@ export function installStoreSharing(ctx: Context): void {
         }
       })
     }
-    const disposeChanged = ctx.on('slots/changed', onChanged)
+    const disposeChanged = typeof ctx.on === 'function'
+      ? ctx.on('slots/changed', onChanged)
+      : () => {}
 
-    const sessions = ctx.sessions
-    const disposeList = sessions.list.subscribe(() => {
-      const snapshot = sessions.list.getSnapshot() as
+    const sessions = ctx.sessions as { list?: { subscribe(fn: () => void): () => void; getSnapshot(): unknown } }
+    const disposeList = sessions.list === undefined ? () => {} : sessions.list.subscribe(() => {
+      const snapshot = sessions.list!.getSnapshot() as
         | { byId: Record<string, unknown>; phase?: string } | undefined
       if (snapshot === undefined || snapshot.phase !== 'ready') return
       for (const cache of caches) {

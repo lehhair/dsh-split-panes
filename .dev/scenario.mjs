@@ -24,6 +24,11 @@ if (url === undefined) {
   console.error('usage: node .dev/scenario.mjs <url-with-token> [label]')
   process.exit(1)
 }
+/** Session titles are instance-specific; override per run when needed. */
+const SESSION_A = process.env.SESSION_A ?? '你好'
+const SESSION_B = process.env.SESSION_B ?? 'DeepSeek Harness 分屏扩展适配研究'
+const SESSION_C = process.env.SESSION_C ?? '分屏渲染问题与dsh扩展'
+const WORKSPACE = process.env.WORKSPACE ?? 'dsh-split-panes'
 const SHOTS = new URL('./shots/', import.meta.url).pathname.replace(/^\//, '')
 mkdirSync(SHOTS, { recursive: true })
 
@@ -76,7 +81,7 @@ await page.waitForSelector('[data-slot="root"]', { timeout: 60000 })
 await page.waitForTimeout(5000)
 
 await run('1 open a session (single pane, native chrome)', async () => {
-  await clickSession('你好')
+  await clickSession(SESSION_A)
   await snap('1-session')
 })
 
@@ -87,7 +92,7 @@ await run('2 split via the header button (new pane = placeholder)', async () => 
 })
 
 await run('3 side-bar switch binds the FOCUSED pane', async () => {
-  await clickSession('DeepSeek Harness 分屏扩展适配研究')
+  await clickSession(SESSION_B)
   await snap('3-switch')
 })
 
@@ -98,7 +103,7 @@ await run('4 clicking the first pane focuses it and follows it globally', async 
 })
 
 await run('5 drag a side-bar session onto a pane centre (replace)', async () => {
-  const source = page.locator('[data-slot="sidebar"] [role="treeitem"]', { hasText: '分屏渲染问题与dsh扩展' }).first()
+  const source = page.locator('[data-slot="sidebar"] [role="treeitem"]', { hasText: SESSION_C }).first()
   await source.dragTo(paneAt(0), { targetPosition: { x: 250, y: 400 } })
   await page.waitForTimeout(3000)
   await snap('5-drag-replace')
@@ -112,7 +117,7 @@ await run('6 start a conversation inside a placeholder pane', async () => {
     .filter({ has: page.getByText('选择工作区') }).last()
   await hero.locator('button', { hasText: '选择工作区' }).first().click()
   await page.waitForTimeout(1200)
-  await page.locator('[role="menuitem"]').filter({ hasText: 'dsh-split-panes' }).first().click()
+  await page.locator('[role="menuitem"]').filter({ hasText: WORKSPACE }).first().click()
   await page.waitForTimeout(6000)
   await snap('6-new-in-placeholder')
 })
@@ -121,3 +126,4 @@ console.log(steps.join('\n'))
 console.log('--- console ---')
 console.log(logs.join('\n') || '(none)')
 await browser.close()
+

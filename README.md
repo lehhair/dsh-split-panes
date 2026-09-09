@@ -43,7 +43,9 @@ git clone https://github.com/lehhair/dsh-split-panes.git
 dsh plugin --profile web add link:/path/to/dsh-split-panes
 ```
 
-重启 `dsh web` 即可使用（会话 header 出现分屏按钮）。要求核心 `>= 0.1.5-alpha.1`。
+重启 `dsh web` 即可使用（会话 header 出现分屏按钮）。
+
+**版本**：开发与测试基线是核心 `0.1.5-alpha.1`（渲染器副本来自该版本）。`0.1.2-rc.1` 也实测可用（分屏 / 双 pane 各自会话 / 焦点路由 / 拖拽均正常）——0.1.5 才有的东西（右侧栏 `rightbar`、header corner 槽）在该版本上不存在，插件会优雅降级（槽未声明就渲染空）。
 
 ## 使用
 

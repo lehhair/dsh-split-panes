@@ -23,8 +23,15 @@ interface OpenableSession {
 export function ensureSessionOpen(ctx: Context, sessionId: string | undefined): void {
   if (sessionId === undefined) return
   const sessions = ctx.get('sessions') as
-    | { binding(id: string): { session?: unknown } | undefined }
+    | { binding?: (id: string) => { session?: unknown } | undefined }
     | undefined
-  const face = sessions?.binding(sessionId)?.session as OpenableSession | undefined
-  if (typeof face?.open === 'function') void face.open()
+  // `binding()` is the 0.1.5 accessor; an older core simply keeps the pane on
+  // its summary data instead of crashing here.
+  if (typeof sessions?.binding !== 'function') return
+  try {
+    const face = sessions.binding(sessionId)?.session as OpenableSession | undefined
+    if (typeof face?.open === 'function') void face.open()
+  } catch (error) {
+    console.error('[dsh-split-panes] could not open pane session window:', error)
+  }
 }

@@ -35,13 +35,22 @@ export function createPaneRootSource(ctx: Context): HostObservable<StandardSourc
   const extraHooks: Record<string, HostObservable<unknown>> = {}
   const extraKeyedHooks: Record<string, KeyedStandardSource> = {}
 
+  // Only sources that exist may enter the binding: the renderer's strict root
+  // materialization throws on an undefined source, so a core without one of
+  // these feeds must degrade to a missing seat, not a crashed pane.
+  const baseHooks: Record<string, HostObservable<unknown>> = {}
+  const sessionsFeed = (ctx as unknown as {
+    sessions?: { list?: HostObservable<unknown> }
+  }).sessions?.list
+  if (sessionsFeed !== undefined) baseHooks['sessions'] = sessionsFeed
+  const pendingFeed = (ctx as unknown as {
+    uiSession?: { pendingInteractions?: HostObservable<unknown> }
+  }).uiSession?.pendingInteractions
+  if (pendingFeed !== undefined) baseHooks['sessionPendingInteraction'] = pendingFeed
+
   const assemble = (): StandardSourceBinding => ({
     key: undefined,
-    hooks: {
-      sessions: ctx.sessions.list,
-      sessionPendingInteraction: ctx.uiSession.pendingInteractions,
-      ...extraHooks,
-    },
+    hooks: { ...baseHooks, ...extraHooks },
     keyedHooks: { ...extraKeyedHooks },
     props: {},
   })
