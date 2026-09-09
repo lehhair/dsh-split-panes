@@ -180,8 +180,12 @@ export function createPaneLayoutStore(): EngineStoreHandle<PaneLayoutState, Pane
       setRatio: (d, splitId: string, ratio: number) => {
         const clamp = Math.min(MAX_RATIO, Math.max(MIN_RATIO, ratio))
         const set = (node: PaneNode): PaneNode => {
-          if (node.type === 'leaf' || node.id !== splitId || node.ratio === clamp) return node
-          return { ...node, ratio: clamp }
+          if (node.type === 'leaf') return node
+          if (node.id === splitId) return node.ratio === clamp ? node : { ...node, ratio: clamp }
+          const first = set(node.first)
+          const second = set(node.second)
+          if (first === node.first && second === node.second) return node
+          return { ...node, first, second }
         }
         d.root = set(d.root)
       },

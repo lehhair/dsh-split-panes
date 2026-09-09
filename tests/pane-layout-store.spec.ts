@@ -76,6 +76,20 @@ describe('pane-layout-store', () => {
     expect((store.getSnapshot().root as Extract<ReturnType<typeof store.getSnapshot>['root'], { type: 'split' }>).ratio).toBe(MIN_RATIO)
   })
 
+  it('updates a nested split ratio', () => {
+    const { store, id } = boot()
+    store.actions.splitPane(id, 'horizontal', SESSION)
+    const outer = store.getSnapshot().root
+    if (outer.type !== 'split' || outer.first.type !== 'leaf') throw new Error('expected a split')
+    store.actions.splitPane(outer.first.id, 'vertical', SESSION)
+    const nested = store.getSnapshot().root
+    if (nested.type !== 'split' || nested.first.type !== 'split') throw new Error('expected a nested split')
+    store.actions.setRatio(nested.first.id, 0.75)
+    const updated = store.getSnapshot().root
+    if (updated.type !== 'split' || updated.first.type !== 'split') throw new Error('expected a nested split')
+    expect(updated.first.ratio).toBe(0.75)
+  })
+
   it('allLeaves lists every pane in tree order', () => {
     const { store, id } = boot()
     store.actions.splitPane(id, 'horizontal', SESSION)
