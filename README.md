@@ -1,6 +1,6 @@
 [![dshfind](https://dshfind.com/api/card/lehhair/dsh-split-panes?lang=zh)](https://dshfind.com/zh/plugins/lehhair/dsh-split-panes?ref=badge)
 
-# dsh-split-panes **暂时不可用！不patch核心难以实现，还在开发测试中**
+# dsh-split-panes
 
 DSH 对话分屏插件（PiUI 风格）：把信息流分成多个可独立操作的窗格，每个窗格绑定自己的会话——分屏/层叠、四向拖拽分配、侧边栏会话拖入。**每个窗格都跑核心自己的渲染器**，插件只提供容器、焦点路由与交互。
 
