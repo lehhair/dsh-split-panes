@@ -7,3 +7,10 @@ node_modules/
 .devruntime/
 .devhome/
 .dev/shots/
+# Ad-hoc probes written while chasing one bug. The curated, committed probes
+# live directly in .dev/; scratch ones land here and are never shipped.
+.dev/scratch/
+
+# Release artifacts: tarballs are produced by build-release.yml from a tag, so
+# they are never tracked (a local `pnpm pack` drops them in the repo root).
+*.tgz
