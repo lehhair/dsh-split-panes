@@ -44,7 +44,7 @@ const WORKFLOW = join(PLUGIN_ROOT, '.github/workflows/build-release.yml')
 const CLIENT_BUNDLE = join(PLUGIN_ROOT, 'lib/client.js')
 
 /** Paths (harness-relative) whose change forces a re-vendor / reconfigure. */
-const CONTACT_SURFACES = [
+export const CONTACT_SURFACES = [
   'packages/client/ui-renderer/src/client/bind.ts',
   'packages/client/ui-renderer/src/client/bindings.tsx',
   'packages/client/ui-renderer/src/client/scoped-slots.tsx',
@@ -52,6 +52,13 @@ const CONTACT_SURFACES = [
   'packages/client/ui-conversation/src/client/skeleton/',
   'packages/client/ui-session/src/client/',
   'packages/client/ui-layout/src/client/',
+  // The pane-chrome glyphs are extracted from these two files (split, stacked,
+  // fullscreen, exit-fullscreen). Leaving them out meant a redrawn upstream
+  // glyph was skipped in silence and the plugin shipped the old icon forever —
+  // exactly the drift that 0.1.5-alpha.2 introduced. `tests/upstream-track.spec.ts`
+  // cross-checks this list against every file the sync scripts read.
+  'packages/client/ui-dockkit/src/components/TabPanel.tsx',
+  'packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx',
 ]
 
 const USAGE = `usage: node scripts/upgrade-core.mjs [--dry-run] [--force] [--skip-check] <dsh-tag> [<sha>] [--files <compare.json>]`

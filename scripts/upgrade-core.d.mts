@@ -17,3 +17,6 @@ export interface UpgradeArgs {
 export function parseArgs(argv: string[]): UpgradeArgs
 export function currentPin(workflow: string): string | undefined
 export function rewritePin(workflow: string, pin: { tag: string; sha: string }): string
+
+/** Harness-relative paths whose change forces a re-vendor / reconfigure. */
+export const CONTACT_SURFACES: string[]

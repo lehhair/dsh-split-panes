@@ -15,7 +15,8 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { currentPin, parseArgs, rewritePin } from '../scripts/upgrade-core.mjs'
+import { CONTACT_SURFACES, currentPin, parseArgs, rewritePin } from '../scripts/upgrade-core.mjs'
+import { VENDORED_FILES } from '../scripts/sync-renderer-vendor.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const read = (path: string): string => readFileSync(`${root}${path}`, 'utf8').replace(/\r\n/g, '\n')
@@ -93,6 +94,18 @@ describe('upstream tracker workflow', () => {
     const workflow = read(TRACK)
     expect(workflow).toMatch(/workflow_dispatch:\n\s+inputs:\n(?:.*\n)*?\s+force:\n\s+description:.*\n\s+type: boolean/)
     expect(workflow).toMatch(/FORCE='--force'/)
+  })
+
+  it('treats every core file the sync scripts read as a contact surface', () => {
+    // Two ways a core file reaches this plugin: copied verbatim by the vendor
+    // script, or a glyph extracted out of a component by the icon script. A
+    // source missing from the list is one the tracker will skip in silence —
+    // the plugin keeps the stale copy forever.
+    const vendored = VENDORED_FILES.map((file) => `packages/client/ui-renderer/src/client/${file}`)
+    const icons = captures(read('scripts/sync-icons.mjs'), /join\(CORE,\s*'([^']+)'\)/g)
+    const sources = [...vendored, ...icons]
+    expect(sources.length).toBeGreaterThan(3)
+    expect(sources.filter((source) => !CONTACT_SURFACES.some((prefix) => source.startsWith(prefix)))).toEqual([])
   })
 })
 
