@@ -1,7 +1,7 @@
 {
   "name": "@dsh-external/dsh-split-panes",
   "description": "DSH split-pane conversation plugin: PiUI-style multi-pane conversation surface — split/stack panes, per-pane sessions, sidebar session drag & drop, single-row fused header. No core patch required: each pane runs the core's own slot renderer against a pane-scoped host.",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "private": true,
   "type": "module",
   "main": "lib/index.js",

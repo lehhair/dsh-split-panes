@@ -30,21 +30,28 @@
 }
 
 /* The divider is an independent grid item whose own width/height + negative
-   margins widen its hit area over the visual 6px gap (PiUI model). */
+   margins widen its hit area over the visual 6px gap (PiUI model).
+   It paints NOTHING — at rest or on hover. That is the core's own convention
+   for column resize: AppFrame.module.css states "No handle draws a visible
+   pill", and its handle carries only `cursor: col-resize`. An earlier hover /
+   focus fill here (interactive-bg-hover) read as a ghost-white band the core
+   never shows. Keyboard focus keeps a thin brand outline so the arrow-key
+   adjustment stays visible (the core's handles are not focusable at all). */
 .divider {
   position: relative;
   z-index: 1;
   touch-action: none;
   cursor: col-resize;
   background: transparent;
+  outline: none;
 }
 
 .split[data-direction='vertical'] .divider {
   cursor: row-resize;
 }
 
-.divider:hover,
 .divider:focus-visible {
-  background: var(--dsw-alias-interactive-bg-hover);
-  outline: none;
+  outline: 2px solid var(--dsw-static-deepseek-500);
+  outline-offset: -1px;
+  border-radius: 2px;
 }

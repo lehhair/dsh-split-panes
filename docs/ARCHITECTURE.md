@@ -223,6 +223,7 @@ inject = ['slots', 'locale', 'sessions', 'uiSession']
 | `lib/client.js` 每次构建字节都不同 | CSS Modules 类名映射对象的 key 顺序来自 lightningcss 的 hash 依赖迭代顺序 | 序列化前对 key 排序（`tsdown.config.ts`），构建变确定性 |
 | pane header 的图标和右则栏"不像一家"（0.1.5-alpha.2） | 图标是**手抄**的，上游 alpha.2 重画了右则栏 glyph（14px 描边→16px figma 实心），手抄件留在 alpha.1 | 改为 `scripts/sync-icons.mjs` 从核心源码**提取生成** + `icons:check` 漂移门 + `upgrade-core` 自动重提取 |
 | 关闭按钮比邻居小/大一圈 | 用了别场景的 glyph：`IconCloseFill14`（dockkit 标签 chip 的 14px 实心）放进 16px 的 header 行；新建对话 header 又用 `IconCloseOutline16`，同一动作两种尺寸 | 统一 `IconCloseOutline16`——核心自己在会话 chrome 行（QueueDock/GoalBar/FloatLayer）就用它 |
+| 分隔条上出现"虚白色"长条 | 插件给分隔条加了 `:hover`/`:focus-visible` 的 `interactive-bg-hover` 填充；核心的 resize handle 是**裸命中条**（`AppFrame.module.css`："No handle draws a visible pill"，只有 `cursor: col-resize`），从不画任何填充 | 分隔条静止/悬停/拖拽全部不画（只留 cursor）；仅键盘 `:focus-visible` 给一条品牌色描边，保住键盘可调 |
 
 ---
 
