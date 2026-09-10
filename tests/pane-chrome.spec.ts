@@ -1,13 +1,13 @@
 // @vitest-environment node
 /**
- * The blank pane's title bar must place its title exactly where the stock header
- * places its own.
+ * The blank pane's bar is the stock header's seat, with the stock header's rows.
  *
  * A blank session has no stock header — the core hides it — so the plugin draws
- * that seat itself. It used to be a 32px bar whose top padding was a
- * `--pane-pad-top` variable that `.pane` overrode to 3px, which sat the
- * "new conversation" title 6px higher than the session title in the pane next to
- * it, 2px taller, and 8px further left.
+ * that seat itself: the split H/V / fullscreen / close icons, no title. Its row
+ * metrics are what line those icons up with the session pane's next to them.
+ *
+ * It used to be a 32px bar with a `--pane-pad-top` variable that `.pane`
+ * overrode to 3px, which sat its content 6px above the session pane's row.
  *
  * Expected values are read out of the core's own stylesheet, so upstream header
  * changes fail here rather than silently misaligning the panes.
@@ -51,30 +51,24 @@ const bare = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, '')
 describe('the blank pane title bar', () => {
   const nativeHeader = block(core, '.header')
   const nativeTitleRow = block(core, '.titleRow')
-  const nativeTitle = block(core, '.crumb')
-  const nativeTitleCurrent = block(core, '.crumbCurrent')
   const hero = block(pane, '.heroHeader')
-  const heroTitle = block(pane, '.heroTitle')
 
   it('opens at the core header top inset, on the core title row height', () => {
-    // 10px + 30px puts the title's centre 25px below the header's top, in the
-    // single full-bleed surface and inside a split pane alike.
+    // 10px + a 30px row is what puts the icons on the same line as the stock
+    // header's actions — the position is the alignment, not decoration.
     expect(insetTop(hero)).toBe(insetTop(nativeHeader))
     expect(prop(hero, 'min-height')).toBe(prop(nativeTitleRow, 'min-height'))
   })
 
-  it('draws the title with the core crumb box and typography', () => {
-    expect(prop(heroTitle, 'font-size')).toBe(prop(nativeTitle, 'font-size'))
-    expect(prop(heroTitle, 'line-height')).toBe(prop(nativeTitle, 'line-height'))
-    // The current crumb is the one carrying the weight the title uses.
-    expect(prop(heroTitle, 'font-weight')).toBe(prop(nativeTitleCurrent, 'font-weight'))
-    // The 8px left padding is what lines the text up with the stock title.
-    expect(prop(heroTitle, 'padding')).toBe(prop(nativeTitle, 'padding'))
+  it('pushes the icon row to the trailing edge, like the stock actions row', () => {
+    expect(hero).toContain('justify-content: flex-end')
   })
 
-  it('has no pane-scoped padding override left over', () => {
+  it('has no title and no pane-scoped padding override left over', () => {
     // The regression: `.pane { --pane-pad-top: 3px }` + `padding: var(...)`.
     expect(bare(pane)).not.toContain('--pane-pad-top')
     expect(hero).not.toContain('var(')
+    // The bar is icon-only: its title rule is gone.
+    expect(bare(pane)).not.toContain('.heroTitle')
   })
 })

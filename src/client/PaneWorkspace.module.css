@@ -75,38 +75,17 @@
   background: transparent;
 }
 
-/* New-conversation pane title bar. The hero has no stock header (the core hides
-   it while a session is blank), so this bar stands in — and it must place its
-   title exactly where the stock header places its own: the core's `.header`
-   opens with 10px of top padding and its `.titleRow` is 30px tall, which puts
-   the title's centre 25px below the header's top in BOTH states (the single
-   full-bleed surface and a split pane). The bar used to be 32px tall with a
-   `--pane-pad-top` override of 3px inside panes, which sat the title 6px higher
-   than the session pane's next to it. */
+/* New-conversation pane title bar: the core hides its header while a session is
+   blank, so this bar stands in for it. Icon controls only — no title. It keeps
+   the core header's top inset (10px) and title row height (30px), which is what
+   puts these icons on the same line as the session pane's next to them. */
 .heroHeader {
   flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  justify-content: flex-end;
   min-height: 30px;
   padding: 10px 20px 0;
-}
-
-/* The core's own title box (`.crumb` / `.crumbCurrent`): 14px/20px, medium,
-   padded 4px 8px — the padding is what puts the text 28px in from the column
-   edge, the same x the stock header's title starts at. */
-.heroTitle {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 4px 8px;
-  font-size: 14px;
-  line-height: 20px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-primary);
 }
 
 .heroActions {

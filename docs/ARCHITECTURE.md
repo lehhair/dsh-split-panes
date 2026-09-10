@@ -218,7 +218,7 @@ inject = ['slots', 'locale', 'sessions', 'uiSession']
 | 输入框乱渲染 / 内容消失（v0.4.0） | 手写 dispatch 与核心漂移（`t` 每帧新身份 → `memo(InputBar)` 每帧重渲染；keyed hook 每帧重订阅） | 不要手写 dispatch，vendor 渲染器 |
 | pane 内多出 `[data-slot="root"]` / `[data-slot="conversation"]` 锚点 | `renderRoot`/`SlotOutlet` 自带 `display:contents` 锚点 | 已核对核心 CSS：只有 `[data-slot='conversation.session']` 一条属性选择器，且在 ConversationRoot 内部，不受影响 |
 | 空白会话的 pane 没有 header | 核心对 blank 会话隐藏 header（`.headerHidden`） | pane 对 `sessionId === null` **或** blank 会话渲染插件自己的新建对话 header |
-| 新建对话的标题和旁边会话 header 的标题行不一致 | 那栏原先是"32px 高 + `--pane-pad-top` 变量"，而 `.pane` 把变量改成 3px：标题比会话标题**高 6px、行高多 2px、左边少 8px** | 该栏照抄核心的 `.header` 顶内边距（10px）+ `.titleRow` 行高（30px），标题盒照抄 `.crumb`/`.crumbCurrent`（14px/20px、`padding: 4px 8px`）；`tests/pane-chrome.spec.ts` 直接从核心 CSS 读这些值比对 |
+| 新建对话 pane 的那一栏和旁边会话 header 对不齐 | 那栏原先是"32px 高 + `--pane-pad-top` 变量"，而 `.pane` 把变量改成 3px：内容比会话 header 的行高 6px | 该栏只留图标（按用户裁决去掉"新建对话"标题），行几何照抄核心：`.header` 顶内边距 10px + `.titleRow` 行高 30px，图标因此和旁边会话 header 的按钮同一条线（实测两边 `centreY` 都是 34）；`tests/pane-chrome.spec.ts` 直接从核心 CSS 读这些值比对 |
 | `slot "conversation" is not declared`（0.1.5-alpha.2） | alpha.2 把中央列改成 keyed 的 `main` 槽，会话根挪到 `main.conversation`；插件仍旧注册 `conversation` | 接管面改为 `main`（key），每 pane 捕获 `main.conversation` 的 ConversationRoot |
 | vendored 文件"漂移"但内容没改（Windows） | git autocrlf 把工作区副本改成 CRLF，纯字节比对误报 | 漂移比对先归一化换行（`tests/renderer-vendor.spec.ts` + sync 脚本） |
 | `lib/client.js` 每次构建字节都不同 | CSS Modules 类名映射对象的 key 顺序来自 lightningcss 的 hash 依赖迭代顺序 | 序列化前对 key 排序（`tsdown.config.ts`），构建变确定性 |

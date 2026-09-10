@@ -160,9 +160,9 @@ describe('PaneWorkspace', () => {
     // mount (session) + the hero branch re-render.
     expect(renderPane).toHaveBeenCalledTimes(2)
     expect(screen.getAllByTestId(/feed-/)).toHaveLength(1)
-    // The hero gets the plugin's new-conversation header: title + split H/V
-    // (no close — nothing to close while unsplit).
-    expect(screen.getAllByText('New conversation')).toHaveLength(1)
+    // The hero gets the plugin's new-conversation header: split H/V icons only
+    // (no title text, no close — nothing to close while unsplit).
+    expect(container.querySelector('[class*="heroHeader"]')?.textContent).toBe('')
     expect(screen.getByRole('button', { name: en['pane.split.horizontal'] })).toBeTruthy()
     expect(screen.getByRole('button', { name: en['pane.split.vertical'] })).toBeTruthy()
     expect(screen.queryByRole('button', { name: en['pane.close'] })).toBeNull()
@@ -181,7 +181,6 @@ describe('PaneWorkspace', () => {
     expect(leaves[0]!.sessionId).toBeNull()
     expect(leaves[1]!.sessionId).toBeNull()
     // Both hero panes now carry the new-conversation header with close.
-    expect(screen.getAllByText('New conversation')).toHaveLength(2)
     expect(screen.getAllByRole('button', { name: en['pane.close'] })).toHaveLength(2)
   })
 

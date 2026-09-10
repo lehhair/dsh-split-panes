@@ -113,7 +113,6 @@ function HeroHeader(props: {
   }
   return (
     <div className={css.heroHeader}>
-      <span className={css.heroTitle}>{t('pane.new.conversation')}</span>
       <div className={css.heroActions}>
         <button
           type="button"
