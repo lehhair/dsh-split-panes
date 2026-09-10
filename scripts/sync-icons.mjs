@@ -104,7 +104,9 @@ function build() {
  *   - split      : ui-dockkit's SplitGlyph (the panel frame + centre divider)
  *   - fullscreen : ui-sidebar-right's FullscreenGlyph (figma corners)
  *   - exit       : ui-sidebar-right's ExitFullscreenGlyph (corners inward)
- * The close control imports ui-primitives' IconCloseFill14 (dockkit's tab close).
+ * The close control imports ui-primitives' IconCloseOutline16 — the core's own
+ * close for conversation chrome (ui-conversation's QueueDock, ui-goal's
+ * GoalBar). The 14px IconCloseFill14 belongs to compact chips/rows instead.
  */
 import type { IconProps } from '@deepseek-ai/dsh-client-ui-primitives'
 

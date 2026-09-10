@@ -221,6 +221,8 @@ inject = ['slots', 'locale', 'sessions', 'uiSession']
 | `slot "conversation" is not declared`（0.1.5-alpha.2） | alpha.2 把中央列改成 keyed 的 `main` 槽，会话根挪到 `main.conversation`；插件仍旧注册 `conversation` | 接管面改为 `main`（key），每 pane 捕获 `main.conversation` 的 ConversationRoot |
 | vendored 文件"漂移"但内容没改（Windows） | git autocrlf 把工作区副本改成 CRLF，纯字节比对误报 | 漂移比对先归一化换行（`tests/renderer-vendor.spec.ts` + sync 脚本） |
 | `lib/client.js` 每次构建字节都不同 | CSS Modules 类名映射对象的 key 顺序来自 lightningcss 的 hash 依赖迭代顺序 | 序列化前对 key 排序（`tsdown.config.ts`），构建变确定性 |
+| pane header 的图标和右则栏"不像一家"（0.1.5-alpha.2） | 图标是**手抄**的，上游 alpha.2 重画了右则栏 glyph（14px 描边→16px figma 实心），手抄件留在 alpha.1 | 改为 `scripts/sync-icons.mjs` 从核心源码**提取生成** + `icons:check` 漂移门 + `upgrade-core` 自动重提取 |
+| 关闭按钮比邻居小/大一圈 | 用了别场景的 glyph：`IconCloseFill14`（dockkit 标签 chip 的 14px 实心）放进 16px 的 header 行；新建对话 header 又用 `IconCloseOutline16`，同一动作两种尺寸 | 统一 `IconCloseOutline16`——核心自己在会话 chrome 行（QueueDock/GoalBar/FloatLayer）就用它 |
 
 ---
 
