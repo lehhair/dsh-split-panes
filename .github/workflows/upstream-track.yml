@@ -1,20 +1,24 @@
 # Track DeepSeek Harness upstream releases and propose a plugin upgrade.
 #
 # The plugin vendors the core slot renderer verbatim (src/client/vendor/renderer)
-# and pins the harness build ref in build-release.yml. When upstream cuts a new
-# dsh-v* release, this workflow:
+# and pins the harness build ref in core-pin.json (which build-release.yml
+# reads). When upstream cuts a new dsh-v* release, this workflow:
 #
 #   1. compares the new release's tree with the currently pinned commit and
 #      checks whether the CONTACT SURFACES this plugin consumes changed
 #      (the vendored renderer files + ui-conversation/ui-session/ui-layout
-#      contracts) — a tag that only bumps the version, or moves work outside
-#      those surfaces, is skipped silently (no empty PRs);
+#      contracts + the icon sources) — a tag that only bumps the version, or
+#      moves work outside those surfaces, is skipped silently (no empty PRs);
 #   2. if a surface changed: rewrites the pin, re-vendors the renderer
 #      (scripts/upgrade-core.mjs), checks out + builds the harness at the NEW
 #      commit, installs, and runs the full `pnpm run check`;
 #   3. if everything is green, opens a PR "chore: track dsh-vX.Y.Z" whose body
 #      tells you whether the built bundle changed (the signal for whether a
 #      patch release is meaningful).
+#
+# The PR touches core-pin.json, never anything under .github/workflows: the
+# default GITHUB_TOKEN cannot push workflow changes, so a branch that edited
+# build-release.yml was rejected by GitHub outright.
 #
 # Releasing stays a manual, PR-gated action: merge the PR, then cut the release
 # (the existing build-release workflow attaches the tarball). A failed adaption
@@ -63,8 +67,11 @@ jobs:
         working-directory: dsh-split-panes
         run: |
           set -euo pipefail
-          OLD=$(sed -n 's/^ *ref: \([0-9a-f]\{40\}\).*/\1/p' .github/workflows/build-release.yml | head -1)
-          echo "current pin: $OLD"
+          # The pin is data (core-pin.json); build-release.yml reads it. Keeping
+          # it out of the workflow matters: GITHUB_TOKEN cannot push workflow
+          # changes, so a PR that edited build-release.yml was rejected.
+          OLD=$(node -p 'require("./core-pin.json").ref')
+          echo "current pin: $OLD ($(node -p 'require("./core-pin.json").tag'))"
           if [ -z "$OLD" ]; then echo "no pinned ref found"; exit 0; fi
 
           # Newest published dsh release (prereleases included).
@@ -195,7 +202,9 @@ jobs:
           git checkout -b "$BRANCH"
           # Everything the upgrade flow can rewrite: the pin, the vendored
           # renderer, the extracted pane icons, and the two sync scripts.
-          git add .github/workflows/build-release.yml \
+          # NOTHING under .github/workflows may be staged: GITHUB_TOKEN has no
+          # `workflows` permission, and such a push is rejected by GitHub.
+          git add core-pin.json \
                   scripts/sync-renderer-vendor.mjs scripts/sync-icons.mjs scripts/upgrade-core.mjs \
                   src/client/vendor src/client/icons.tsx
           git commit -m "chore: track $LATEST"

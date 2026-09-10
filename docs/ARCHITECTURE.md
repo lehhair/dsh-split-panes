@@ -250,11 +250,26 @@ inject = ['slots', 'locale', 'sessions', 'uiSession']
 
 1. 新 tag 的 commit 与当前钉死 ref 做 compare，**只**检查上面接触面
    - 没变 → 静默跳过，不开 PR、不发版（避免空 PR / 空版本）
-   - 变了 → 改写 `build-release.yml` 钉死 ref + 重新 vendor（`scripts/upgrade-core.mjs`）
+   - 变了 → 改写 `core-pin.json` 的钉死 ref + 重新 vendor（`scripts/upgrade-core.mjs`）
 2. 检出新 commit 的 harness 构建 → 安装 → 全量 `pnpm run check`
    - 红 → **不开 PR**，需要先适配（见 §10）
    - 绿 → 开 PR `chore: track dsh-vX.Y.Z`，正文写明构建产物 `lib/client.js` 是否变化（= 发 patch 版本是否有意义）
 3. 发版仍是**人工闸门**：合 PR 后手动 `gh release`（`build-release` 出 tarball）
+
+**pin 为什么是数据文件而不是 workflow 里的一行**：默认 `GITHUB_TOKEN` 无法推送
+`.github/workflows/` 下的任何改动（`permissions:` 里根本没有 `workflows` 这个键，
+加权限也修不了）。tracker 一开始是改 `build-release.yml` 里的 `ref:`，push 直接被
+GitHub 拒：
+
+```
+! [remote rejected] chore/upstream-... -> chore/upstream-...
+  (refusing to allow a GitHub App to create or update workflow
+   `.github/workflows/build-release.yml` without `workflows` permission)
+```
+
+所以 pin 挪到 `core-pin.json`（`build-release.yml` 用 `steps.core.outputs.ref` 读它），
+tracker 的 PR 只碰非 workflow 文件 → 不需要任何 PAT／App 就能开 PR。顺带把"改 YAML
+文本、还要保住 `ref:` 上面的注释"这一整类坑消掉了。
 
 手动 dispatch 时给 `force: true` 可以**跳过接触面判定**，即使上游没碰接触面也照走
 "钉 ref → 重新 vendor → 全量 check → 开 PR"，用来验证 PR 那半边链路没坏（定时路径
@@ -262,14 +277,16 @@ inject = ['slots', 'locale', 'sessions', 'uiSession']
 
 > 顺序有讲究：harness 必须在 `Pin + re-vendor` **之前**检出——`upgrade-core.mjs` 是从
 > 那棵树里拷渲染器与图标的，所以它需要源码（不需要 install）。`tests/upstream-track.spec.ts`
-> 把这条顺序、以及下面两个坑都钉成了测试。
+> 把这条顺序、以及下面几个坑都钉成了测试。
 
-两个已经踩过的坑（都在 `tests/upstream-track.spec.ts` 里有回归测试）：
+已经踩过的坑（都在 `tests/upstream-track.spec.ts` 里有回归测试）：
 
 | 坑 | 症状 | 修法 |
 |---|---|---|
 | `$GITHUB_ENV` 写小写 `latest=`，步骤里读 `$LATEST` | 变量全空 → `upgrade-core` 收到空 tag/sha，把 `ref:` 写成**空值**，直到下一步才炸 | 写大写名；`upgrade-core` 对非 40-hex 的 sha 直接 `exit 128`，一个字节都不写 |
 | `argv` 过滤用 `i !== filesIdx + 1` 排除 `--files` 的值 | `--files` 不存在时 `filesIdx+1 === 0`，**第一个位置参数（tag）被丢掉**：`upgrade:core dsh-v0.1.6` 报 usage，`upgrade:core <tag> <sha>` 把 sha 当 tag | 只有 `--files` 真存在时才跳过那两个槽位 |
+| 图标提取源（`ui-dockkit/TabPanel.tsx`、`ui-sidebar-right/SidebarRight.tsx`）不在接触面清单里 | 上游重画图标 → tracker 静默跳过，插件永远停在旧图标（alpha.2 那次就是这么漏的） | 两个文件加入 `CONTACT_SURFACES`；测试反过来校验"同步脚本读的每个核心文件都必须被清单覆盖" |
+| tracker 的 PR 里有 `.github/workflows/` 下的文件 | `git push` 被 GitHub 拒（`workflows` 权限），整条链路在最后一步死掉 | pin 挪进 `core-pin.json`；测试直接断言 `git add` 列表不含 `.github` |
 
 **本地一键**（开发时用，和 CI 同一套代码路径）：
 
@@ -323,9 +340,11 @@ src/client/
   vendor/renderer/      # 核心渲染器逐字节副本 + README（出处与同步说明）
 scripts/sync-renderer-vendor.mjs      # 逐字节同步 vendored 渲染器（--check 只比对）
 scripts/upgrade-core.mjs              # 一键升级：接触面判定 + 改 pin + 同步 +（可选）check
+core-pin.json                         # 钉死的核心 tag/commit（build-release 读它，tracker 改它）
 .github/workflows/upstream-track.yml  # 每 6h 检测上游、开跟踪 PR
 tests/
   renderer-vendor.spec.ts  # 漂移守门
+  upstream-track.spec.ts   # tracker/upgrade-core：变量名、步骤顺序、接触面覆盖、pin 格式
   pane-render.spec.tsx     # 真实 ui-conversation 装配下按 pane 渲染
   pane-workspace.spec.tsx  # 容器行为（分屏/焦点路由/拖拽/快捷键/侧边栏 click）
   apply.spec.tsx           # 注册面 + 拖拽通道

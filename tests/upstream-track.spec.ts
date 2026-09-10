@@ -15,7 +15,7 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { CONTACT_SURFACES, currentPin, parseArgs, rewritePin } from '../scripts/upgrade-core.mjs'
+import { CONTACT_SURFACES, parseArgs, readPin, rewritePin } from '../scripts/upgrade-core.mjs'
 import { VENDORED_FILES } from '../scripts/sync-renderer-vendor.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
@@ -23,6 +23,7 @@ const read = (path: string): string => readFileSync(`${root}${path}`, 'utf8').re
 
 const TRACK = '.github/workflows/upstream-track.yml'
 const RELEASE = '.github/workflows/build-release.yml'
+const PIN = 'core-pin.json'
 
 /** Every `run:` block body in a workflow, dedented to column zero. */
 function runBlocks(workflow: string): string[] {
@@ -107,6 +108,27 @@ describe('upstream tracker workflow', () => {
     expect(sources.length).toBeGreaterThan(3)
     expect(sources.filter((source) => !CONTACT_SURFACES.some((prefix) => source.startsWith(prefix)))).toEqual([])
   })
+
+  it('never stages a workflow file, which GITHUB_TOKEN cannot push', () => {
+    // GitHub rejected the tracker's push outright:
+    //   refusing to allow a GitHub App to create or update workflow
+    //   `.github/workflows/build-release.yml` without `workflows` permission
+    // There is no `workflows` key in GITHUB_TOKEN's permission set, so no
+    // permissions block can fix it: the pin must not live in a workflow file.
+    const workflow = read(TRACK)
+    const lines = (runBlocks(workflow).find((block) => block.includes('git add')) ?? '').split('\n')
+    const start = lines.findIndex((line) => line.includes('git add'))
+    const staged: string[] = []
+    for (let i = start; i >= 0 && i < lines.length; i += 1) {
+      const line = lines[i] ?? ''
+      staged.push(line)
+      if (!line.trimEnd().endsWith('\\')) break
+    }
+    expect(staged.join(' ')).toContain('core-pin.json')
+    expect(staged.join(' ')).not.toContain('.github')
+    expect(read(RELEASE)).not.toMatch(/^\s+ref:\s*[0-9a-f]{40}\s*$/m)
+    expect(read(RELEASE)).toContain('steps.core.outputs.ref')
+  })
 })
 
 describe('upgrade-core argument handling', () => {
@@ -133,8 +155,8 @@ describe('upgrade-core argument handling', () => {
     })
   })
 
-  it('exits 128 without touching the pinned workflow', () => {
-    const before = read(RELEASE)
+  it('exits 128 without touching the pin file', () => {
+    const before = read(PIN)
     const cases: Array<[string[], string]> = [
       // Both positionals empty: the run dies on usage instead of pinning `ref:`.
       [['', '', '--files', 'compare.json', '--force'], 'usage:'],
@@ -150,47 +172,46 @@ describe('upgrade-core argument handling', () => {
       expect(result.status, label).toBe(128)
       expect(`${result.stdout}${result.stderr}`, label).toContain(expected)
     }
-    expect(read(RELEASE)).toBe(before)
+    expect(read(PIN)).toBe(before)
   })
 })
 
-describe('pin rewrite', () => {
-  const release = read(RELEASE)
-  const releaseLines = release.split('\n')
+describe('the pin file', () => {
+  const pin = read(PIN)
   const NEW_SHA = '0123456789abcdef0123456789abcdef01234567'
 
-  it('targets a pin introduced by exactly one comment line', () => {
-    const pinIdx = releaseLines.findIndex((line) => /^\s*ref:\s*[0-9a-f]{40}\s*$/.test(line))
-    expect(pinIdx).toBeGreaterThan(0)
-    // The single comment line above the pin is the one the rewrite replaces;
-    // a wider comment block would be swallowed by the replacement.
-    expect(releaseLines[pinIdx - 1]).toMatch(/^\s*#/)
-    expect(releaseLines[pinIdx - 2]).not.toMatch(/^\s*#/)
+  it('names a tag and a 40-hex ref', () => {
+    const parsed = readPin(pin)
+    expect(parsed.tag).toMatch(/^dsh-v/)
+    expect(parsed.ref).toMatch(/^[0-9a-f]{40}$/)
   })
 
-  it('rewrites the real release workflow in place', () => {
-    const pinIdx = releaseLines.findIndex((line) => /^\s*ref:\s*[0-9a-f]{40}\s*$/.test(line))
-    const next = rewritePin(release, { tag: 'dsh-v0.1.6', sha: NEW_SHA })
-    const lines = next.split('\n')
-    expect(lines.length).toBe(releaseLines.length)
-    expect(lines[pinIdx]).toBe(`          ref: ${NEW_SHA}`)
-    expect(lines[pinIdx - 1]).toBe('          # dsh-v0.1.6; keep in sync with the vendored renderer.')
-    expect(currentPin(next)).toBe(NEW_SHA)
+  it('is what the release workflow reads its ref from', () => {
+    // The workflow cannot hardcode the ref: GITHUB_TOKEN may not write it.
+    const release = read(RELEASE)
+    expect(release).toContain('core-pin.json')
+    expect(release).toContain('ref: ${{ steps.core.outputs.ref }}')
   })
 
-  it('collapses a stray multi-line comment block instead of stranding it', () => {
-    const stray = `      - name: x\n        with:\n          # stale one\n          # stale two\n          ref: ${NEW_SHA}\n`
-    const next = rewritePin(stray, { tag: 'dsh-v0.1.6', sha: 'a'.repeat(40) })
-    expect(next.split('\n').filter((line) => line.includes('stale'))).toEqual([])
-    expect(next).toContain(`          ref: ${'a'.repeat(40)}`)
+  it('keeps its note and rewrites the tag + ref', () => {
+    const next = rewritePin(pin, { tag: 'dsh-v0.1.6', sha: NEW_SHA })
+    const parsed = readPin(next)
+    expect(parsed.tag).toBe('dsh-v0.1.6')
+    expect(parsed.ref).toBe(NEW_SHA)
+    // The explanatory note survives the rewrite untouched.
+    expect(parsed.note).toBe(readPin(pin).note)
+    expect(next.endsWith('\n')).toBe(true)
   })
 
   it('is idempotent', () => {
-    const once = rewritePin(release, { tag: 'dsh-v0.1.6', sha: NEW_SHA })
+    const once = rewritePin(pin, { tag: 'dsh-v0.1.6', sha: NEW_SHA })
     expect(rewritePin(once, { tag: 'dsh-v0.1.6', sha: NEW_SHA })).toBe(once)
   })
 
-  it('refuses a workflow with no pin', () => {
-    expect(() => rewritePin('      - name: x\n', { tag: 'dsh-v0.1.6', sha: NEW_SHA })).toThrow(/no pinned/)
+  it('rejects a mangled pin instead of writing garbage', () => {
+    expect(() => readPin('not json')).toThrow(/not valid JSON/)
+    expect(() => readPin(JSON.stringify({ tag: 'dsh-v0.1.6' }))).toThrow(/40-hex ref/)
+    expect(() => readPin(JSON.stringify({ ref: 'a'.repeat(40) }))).toThrow(/missing a tag/)
+    expect(() => readPin(JSON.stringify({ tag: 'dsh-v0.1.6', ref: '' }))).toThrow(/40-hex ref/)
   })
 })

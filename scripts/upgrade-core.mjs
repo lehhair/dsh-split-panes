@@ -8,16 +8,22 @@
  *        (the vendored renderer files + the component contract packs).
  *        A tag that only bumps the version — or moves work we do not consume —
  *        is ignored, so no empty upgrade PRs get opened.
- *   2. rewrite the release workflow's pinned harness ref to the target tag
+ *   2. rewrite the pinned harness ref in core-pin.json to the target tag
  *   3. re-vendor the slot renderer from the core checkout
  *   4. run the full check (drift guard + typecheck + tests + build)
  *   5. report whether the built client bundle actually changed — the signal
  *      for whether releasing a new plugin patch makes sense.
  *
+ * The pin is data (core-pin.json), NOT a line inside build-release.yml: the
+ * default GITHUB_TOKEN cannot push anything under .github/workflows, so a
+ * tracker PR that edited the workflow was rejected outright. The release
+ * workflow reads the file and passes its ref to actions/checkout.
+ *
  * CONTACT SURFACES (paths relative to the harness root):
  *   renderer  : the vendored slot renderer (must re-vendor when touched)
  *   contracts : ui-conversation skeleton + contract/, ui-session/, ui-layout/
  *               (the seats the vendored renderer feeds the stock components)
+ *   icons     : the two components the pane-chrome glyphs are extracted from
  *
  * Usage (from the plugin root):
  *   node scripts/upgrade-core.mjs dsh-v0.1.6-alpha.1                # resolve from the local core checkout
@@ -40,7 +46,7 @@ import { fileURLToPath } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLUGIN_ROOT = resolve(HERE, '..')
 const CORE = resolve(PLUGIN_ROOT, '../dsh2026/deepseek-harness')
-const WORKFLOW = join(PLUGIN_ROOT, '.github/workflows/build-release.yml')
+const PIN_FILE = join(PLUGIN_ROOT, 'core-pin.json')
 const CLIENT_BUNDLE = join(PLUGIN_ROOT, 'lib/client.js')
 
 /** Paths (harness-relative) whose change forces a re-vendor / reconfigure. */
@@ -90,25 +96,34 @@ export function parseArgs(argv) {
 }
 
 /**
- * Rewrite the pin (and its single comment line) in the release workflow text.
+ * Rewrite the pin in the core-pin.json text.
  *
- * The whole comment run directly above `ref:` is replaced by one canonical
- * line: overwriting just one line used to leave the tail of a multi-line
- * comment block stranded above the pin.
+ * The pin is data rather than a line inside build-release.yml because the
+ * default GITHUB_TOKEN cannot push anything under .github/workflows: a tracker
+ * branch that edited the workflow was rejected by GitHub ("refusing to allow a
+ * GitHub App to create or update workflow ... without `workflows` permission").
+ * Editing JSON also removes the whole class of "did the comment above `ref:`
+ * survive the rewrite" bugs.
  */
-export function rewritePin(workflow, { tag, sha }) {
-  const lines = workflow.split('\n')
-  let refIdx = -1
-  lines.forEach((line, i) => { if (/^\s*ref:\s*[0-9a-f]{40}\s*$/.test(line)) refIdx = i })
-  if (refIdx === -1) throw new Error('no pinned `ref:` line found')
-  let commentStart = refIdx
-  while (commentStart > 0 && /^\s*#/.test(lines[commentStart - 1])) commentStart -= 1
-  const next = [...lines]
-  next.splice(commentStart, refIdx - commentStart, `          # ${tag}; keep in sync with the vendored renderer.`)
-  const newRefIdx = commentStart + 1
-  next[newRefIdx] = `          ref: ${sha}`
-  if (!/^\s*ref:\s*[0-9a-f]{40}\s*$/.test(next[newRefIdx])) throw new Error('internal: pin rewrite lost the ref line')
-  return next.join('\n')
+export function rewritePin(pinText, { tag, sha }) {
+  const current = readPin(pinText)
+  const next = { ...(current.note === undefined ? {} : { note: current.note }), tag, ref: sha }
+  return `${JSON.stringify(next, null, 2)}\n`
+}
+
+/** Parse core-pin.json, rejecting anything that is not a tag + 40-hex ref. */
+export function readPin(pinText) {
+  let parsed
+  try {
+    parsed = JSON.parse(pinText)
+  } catch {
+    throw new Error('core-pin.json is not valid JSON')
+  }
+  if (parsed === null || typeof parsed !== 'object') throw new Error('core-pin.json must be an object')
+  const { note, tag, ref } = parsed
+  if (typeof tag !== 'string' || tag === '') throw new Error('core-pin.json is missing a tag')
+  if (typeof ref !== 'string' || !/^[0-9a-f]{40}$/.test(ref)) throw new Error('core-pin.json is missing a 40-hex ref')
+  return { note: typeof note === 'string' ? note : undefined, tag, ref }
 }
 
 function main() {
@@ -119,8 +134,8 @@ function main() {
   }
 
   const sha = explicitSha === undefined ? resolveFromLocalCheckout(tag) : explicitSha
-  // Validate BEFORE anything is written: a bogus sha used to be pinned into the
-  // release workflow (`ref: ` with an empty value), breaking it for real.
+  // Validate BEFORE anything is written: an empty sha used to be pinned into
+  // the release workflow (`ref: ` with an empty value), breaking it for real.
   if (sha === undefined || !/^[0-9a-f]{40}$/.test(sha)) {
     console.error(
       `cannot resolve ${tag} to a commit sha${sha === undefined ? '' : ` (got ${JSON.stringify(sha)})`}\n` +
@@ -128,10 +143,9 @@ function main() {
     )
     process.exit(128)
   }
-  // The release workflow currently pins one commit; that is the change baseline.
-  const workflow = readFileSync(WORKFLOW, 'utf8')
-  const oldSha = currentPin(workflow)
-  if (oldSha === undefined) throw new Error(`no pinned \`ref:\` line found in ${WORKFLOW}`)
+  // The pin file currently names one commit; that is the change baseline.
+  const pinText = readFileSync(PIN_FILE, 'utf8')
+  const oldSha = readPin(pinText).ref
   if (oldSha === sha) {
     console.log(`already pinned to ${tag} (${sha}) — nothing to do`)
     return
@@ -149,9 +163,9 @@ function main() {
     }
   }
 
-  // ---- 2. pin the workflow ----
-  if (!dryRun) writeFileSync(WORKFLOW, rewritePin(workflow, { tag, sha }))
-  console.log(`${dryRun ? '[dry-run] would pin' : 'pinned'}  ${WORKFLOW} -> ${tag} @ ${sha}`)
+  // ---- 2. pin ----
+  if (!dryRun) writeFileSync(PIN_FILE, rewritePin(pinText, { tag, sha }))
+  console.log(`${dryRun ? '[dry-run] would pin' : 'pinned'}  ${PIN_FILE} -> ${tag} @ ${sha}`)
 
   // ---- 3. re-vendor ----
   const before = dryRun ? '' : readFileSync(CLIENT_BUNDLE, 'utf8')
@@ -185,7 +199,7 @@ check FAILED after tracking ${tag}.
 
 If a contact surface changed, the plugin must adapt before it can be released —
 see docs/ARCHITECTURE.md §10 for the seams the vendored renderer touches.
-The workflow pin has ALREADY been rewritten; '$ git checkout -- .github/workflows/build-release.yml' reverts it.`)
+The pin in core-pin.json has ALREADY been rewritten; '$ git checkout -- core-pin.json' reverts it.`)
       process.exit(1)
     }
     console.log('check   OK')
@@ -198,14 +212,6 @@ The workflow pin has ALREADY been rewritten; '$ git checkout -- .github/workflow
   }
 
   console.log(`${dryRun ? '[dry-run] done — nothing written, nothing changed.' : `\nDone tracking ${tag} @ ${sha}.`}`)
-}
-
-export function currentPin(workflow) {
-  for (const line of workflow.split('\n')) {
-    const m = /^\s*ref:\s*([0-9a-f]{40})\s*$/.exec(line)
-    if (m) return m[1]
-  }
-  return undefined
 }
 
 /** The package-manager command (Windows resolves the .cmd shim under `shell`). */

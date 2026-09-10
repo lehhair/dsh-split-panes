@@ -14,9 +14,16 @@ export interface UpgradeArgs {
   explicitSha: string | undefined
 }
 
+/** The parsed contents of core-pin.json. */
+export interface CorePin {
+  note: string | undefined
+  tag: string
+  ref: string
+}
+
 export function parseArgs(argv: string[]): UpgradeArgs
-export function currentPin(workflow: string): string | undefined
-export function rewritePin(workflow: string, pin: { tag: string; sha: string }): string
+export function readPin(pinText: string): CorePin
+export function rewritePin(pinText: string, pin: { tag: string; sha: string }): string
 
 /** Harness-relative paths whose change forces a re-vendor / reconfigure. */
 export const CONTACT_SURFACES: string[]
