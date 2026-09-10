@@ -75,30 +75,36 @@
   background: transparent;
 }
 
-/* New-conversation pane title bar: the hero has no stock header, so the pane
-   shows a minimal bar aligned with the session panes' header baseline. In
-   the SINGLE full-bleed state it sits at the column top (12px default pad,
-   same as the native header); inside split panes the frame's padding + border
-   shift everything down, so the pane overrides --pane-pad-top to keep the
-   content row on the same y=28 baseline. */
+/* New-conversation pane title bar. The hero has no stock header (the core hides
+   it while a session is blank), so this bar stands in — and it must place its
+   title exactly where the stock header places its own: the core's `.header`
+   opens with 10px of top padding and its `.titleRow` is 30px tall, which puts
+   the title's centre 25px below the header's top in BOTH states (the single
+   full-bleed surface and a split pane). The bar used to be 32px tall with a
+   `--pane-pad-top` override of 3px inside panes, which sat the title 6px higher
+   than the session pane's next to it. */
 .heroHeader {
   flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 32px;
-  padding: var(--pane-pad-top, 12px) 20px 0;
+  min-height: 30px;
+  padding: 10px 20px 0;
 }
 
+/* The core's own title box (`.crumb` / `.crumbCurrent`): 14px/20px, medium,
+   padded 4px 8px — the padding is what puts the text 28px in from the column
+   edge, the same x the stock header's title starts at. */
 .heroTitle {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
-  line-height: 16px;
+  padding: 4px 8px;
+  font-size: 14px;
+  line-height: 20px;
   font-weight: 500;
   color: var(--dsw-alias-label-primary);
 }
@@ -108,15 +114,6 @@
   align-items: center;
   gap: 2px;
   flex: none;
-}
-
-/* The pane's header chrome must line up with the side-bar's top chrome:
-   the frame's 8px padding + 1px border shift everything down, so the pane
-   overrides the top-padding variable (12px -> 3px) — the stock header AND
-   the hero title bar both inherit it, keeping their content rows centered
-   on the same y=28 baseline as the single pane. */
-.pane {
-  --pane-pad-top: 3px;
 }
 
 /* Header split affordance (the stock conversation header's actions row,
