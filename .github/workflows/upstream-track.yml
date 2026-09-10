@@ -88,10 +88,31 @@ jobs:
 
           # GitHub compare file list feeds the contact-surface gate (exit 3 = skip).
           gh api "repos/deepseek-ai/deepseek-harness/compare/$OLD...$NEW_SHA" > compare.json
-          printf 'old=%s\nlatest=%s\nnew_sha=%s\n' "$OLD" "$LATEST" "$NEW_SHA" >> "$GITHUB_ENV"
+          # UPPERCASE on purpose: every later step reads $OLD / $LATEST / $NEW_SHA.
+          # Writing lowercase names here made all three expand to the empty
+          # string in the steps below (a shell variable that was never set),
+          # which then fed an empty tag and sha to upgrade-core.
+          printf 'OLD=%s\nLATEST=%s\nNEW_SHA=%s\n' "$OLD" "$LATEST" "$NEW_SHA" >> "$GITHUB_ENV"
+
+      # Checked out BEFORE the re-vendor: upgrade-core copies the vendored
+      # renderer and the pane icons straight out of this tree, so it must
+      # already be on disk. Only the sources are needed here — no install.
+      - name: Checkout harness at the new pin
+        if: env.NEW_SHA != ''
+        uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ env.NEW_SHA }}
+          # Sibling of the plugin checkout: the plugin's devDependencies are
+          # `link:../dsh2026/deepseek-harness/...` (same layout as
+          # build-release.yml). Nesting it under the plugin dir would resolve
+          # the links one level too deep.
+          path: dsh2026/deepseek-harness
+          fetch-depth: 1
 
       - name: Pin + re-vendor (skips when no contact surface changed)
         id: upgrade
+        if: env.NEW_SHA != ''
         working-directory: dsh-split-panes
         run: |
           set +e
@@ -112,19 +133,6 @@ jobs:
       - name: Skip when untouched
         if: steps.upgrade.outputs.skip == 'true'
         run: echo "upstream release does not touch this plugin's surfaces — done"
-
-      - name: Checkout harness at the new pin
-        if: steps.upgrade.outputs.skip != 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: deepseek-ai/deepseek-harness
-          ref: ${{ env.new_sha }}
-          # Sibling of the plugin checkout: the plugin's devDependencies are
-          # `link:../dsh2026/deepseek-harness/...` (same layout as
-          # build-release.yml). Nesting it under the plugin dir would resolve
-          # the links one level too deep.
-          path: dsh2026/deepseek-harness
-          fetch-depth: 1
 
       - name: Setup pnpm
         if: steps.upgrade.outputs.skip != 'true'

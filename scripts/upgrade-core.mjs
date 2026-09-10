@@ -29,7 +29,8 @@
  *     `.files[].filename`; used when the local core checkout lacks history.
  *
  * Exit codes: 0 = nothing to do / done; 1 = check failed (contract work needed);
- * 3 = contact surfaces untouched (parsed by the tracker to skip silently).
+ * 3 = contact surfaces untouched (parsed by the tracker to skip silently);
+ * 128 = bad arguments / tag not resolvable to a commit sha (nothing written).
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -55,25 +56,69 @@ const CONTACT_SURFACES = [
 
 const USAGE = `usage: node scripts/upgrade-core.mjs [--dry-run] [--force] [--skip-check] <dsh-tag> [<sha>] [--files <compare.json>]`
 
-function main() {
-  const argv = process.argv.slice(2)
-  const dryRun = argv.includes('--dry-run')
-  const force = argv.includes('--force')
-  const skipCheck = argv.includes('--skip-check')
-  let filesJson
+/**
+ * Split argv into flags and the two positional values.
+ *
+ * Empty arguments are DROPPED, not treated as positional values: a shell
+ * variable that was never set expands to '' and would otherwise arrive as a
+ * real tag/sha (that is exactly how an empty sha once got pinned into the
+ * release workflow).
+ */
+export function parseArgs(argv) {
   const filesIdx = argv.indexOf('--files')
-  if (filesIdx !== -1) filesJson = argv[filesIdx + 1]
-  const positional = argv.filter((arg, i) => !arg.startsWith('--') && i !== filesIdx && i !== filesIdx + 1)
-  const tag = positional[0]
-  const explicitSha = positional[1]
+  // Only exclude the two slots `--files` occupies when the flag is actually
+  // present: with filesIdx === -1 the old `i !== filesIdx + 1` test matched
+  // index 0 and silently dropped the tag (`upgrade:core dsh-v0.1.6` failed
+  // with a usage error, and `upgrade:core <tag> <sha>` read the sha as tag).
+  const fileSlot = (i) => filesIdx !== -1 && (i === filesIdx || i === filesIdx + 1)
+  const positional = argv.filter((arg, i) => arg !== '' && !arg.startsWith('--') && !fileSlot(i))
+  return {
+    dryRun: argv.includes('--dry-run'),
+    force: argv.includes('--force'),
+    skipCheck: argv.includes('--skip-check'),
+    filesJson: filesIdx === -1 ? undefined : argv[filesIdx + 1],
+    tag: positional[0],
+    explicitSha: positional[1] === undefined ? undefined : positional[1],
+  }
+}
+
+/**
+ * Rewrite the pin (and its single comment line) in the release workflow text.
+ *
+ * The whole comment run directly above `ref:` is replaced by one canonical
+ * line: overwriting just one line used to leave the tail of a multi-line
+ * comment block stranded above the pin.
+ */
+export function rewritePin(workflow, { tag, sha }) {
+  const lines = workflow.split('\n')
+  let refIdx = -1
+  lines.forEach((line, i) => { if (/^\s*ref:\s*[0-9a-f]{40}\s*$/.test(line)) refIdx = i })
+  if (refIdx === -1) throw new Error('no pinned `ref:` line found')
+  let commentStart = refIdx
+  while (commentStart > 0 && /^\s*#/.test(lines[commentStart - 1])) commentStart -= 1
+  const next = [...lines]
+  next.splice(commentStart, refIdx - commentStart, `          # ${tag}; keep in sync with the vendored renderer.`)
+  const newRefIdx = commentStart + 1
+  next[newRefIdx] = `          ref: ${sha}`
+  if (!/^\s*ref:\s*[0-9a-f]{40}\s*$/.test(next[newRefIdx])) throw new Error('internal: pin rewrite lost the ref line')
+  return next.join('\n')
+}
+
+function main() {
+  const { dryRun, force, skipCheck, filesJson, tag, explicitSha } = parseArgs(process.argv.slice(2))
   if (tag === undefined) {
     console.error(USAGE)
     process.exit(128)
   }
 
-  const sha = explicitSha ?? resolveFromLocalCheckout(tag)
-  if (sha === undefined) {
-    console.error(`cannot resolve ${tag} — pass the commit sha explicitly (CI resolves it via git ls-remote)`)
+  const sha = explicitSha === undefined ? resolveFromLocalCheckout(tag) : explicitSha
+  // Validate BEFORE anything is written: a bogus sha used to be pinned into the
+  // release workflow (`ref: ` with an empty value), breaking it for real.
+  if (sha === undefined || !/^[0-9a-f]{40}$/.test(sha)) {
+    console.error(
+      `cannot resolve ${tag} to a commit sha${sha === undefined ? '' : ` (got ${JSON.stringify(sha)})`}\n` +
+      'pass the commit sha explicitly (CI resolves it via git ls-remote)',
+    )
     process.exit(128)
   }
   // The release workflow currently pins one commit; that is the change baseline.
@@ -98,14 +143,7 @@ function main() {
   }
 
   // ---- 2. pin the workflow ----
-  const lines = workflow.split('\n')
-  let refIdx = -1
-  lines.forEach((line, i) => { if (/^\s*ref:\s*[0-9a-f]{40}\s*$/.test(line)) refIdx = i })
-  if (refIdx === -1) throw new Error(`no pinned \`ref:\` line found in ${WORKFLOW}`)
-  const next = [...lines]
-  next[refIdx] = `          ref: ${sha}`
-  next[refIdx - 1] = `          # ${tag}; keep in sync with the vendored renderer.`
-  if (!dryRun) writeFileSync(WORKFLOW, next.join('\n'))
+  if (!dryRun) writeFileSync(WORKFLOW, rewritePin(workflow, { tag, sha }))
   console.log(`${dryRun ? '[dry-run] would pin' : 'pinned'}  ${WORKFLOW} -> ${tag} @ ${sha}`)
 
   // ---- 3. re-vendor ----
@@ -155,7 +193,7 @@ The workflow pin has ALREADY been rewritten; '$ git checkout -- .github/workflow
   console.log(`${dryRun ? '[dry-run] done — nothing written, nothing changed.' : `\nDone tracking ${tag} @ ${sha}.`}`)
 }
 
-function currentPin(workflow) {
+export function currentPin(workflow) {
   for (const line of workflow.split('\n')) {
     const m = /^\s*ref:\s*([0-9a-f]{40})\s*$/.exec(line)
     if (m) return m[1]

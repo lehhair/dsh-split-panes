@@ -256,6 +256,21 @@ inject = ['slots', 'locale', 'sessions', 'uiSession']
    - 绿 → 开 PR `chore: track dsh-vX.Y.Z`，正文写明构建产物 `lib/client.js` 是否变化（= 发 patch 版本是否有意义）
 3. 发版仍是**人工闸门**：合 PR 后手动 `gh release`（`build-release` 出 tarball）
 
+手动 dispatch 时给 `force: true` 可以**跳过接触面判定**，即使上游没碰接触面也照走
+"钉 ref → 重新 vendor → 全量 check → 开 PR"，用来验证 PR 那半边链路没坏（定时路径
+平时走不到它）。此时 PR 正文会注明这是强制触发、合并与发版都不必要。
+
+> 顺序有讲究：harness 必须在 `Pin + re-vendor` **之前**检出——`upgrade-core.mjs` 是从
+> 那棵树里拷渲染器与图标的，所以它需要源码（不需要 install）。`tests/upstream-track.spec.ts`
+> 把这条顺序、以及下面两个坑都钉成了测试。
+
+两个已经踩过的坑（都在 `tests/upstream-track.spec.ts` 里有回归测试）：
+
+| 坑 | 症状 | 修法 |
+|---|---|---|
+| `$GITHUB_ENV` 写小写 `latest=`，步骤里读 `$LATEST` | 变量全空 → `upgrade-core` 收到空 tag/sha，把 `ref:` 写成**空值**，直到下一步才炸 | 写大写名；`upgrade-core` 对非 40-hex 的 sha 直接 `exit 128`，一个字节都不写 |
+| `argv` 过滤用 `i !== filesIdx + 1` 排除 `--files` 的值 | `--files` 不存在时 `filesIdx+1 === 0`，**第一个位置参数（tag）被丢掉**：`upgrade:core dsh-v0.1.6` 报 usage，`upgrade:core <tag> <sha>` 把 sha 当 tag | 只有 `--files` 真存在时才跳过那两个槽位 |
+
 **本地一键**（开发时用，和 CI 同一套代码路径）：
 
 ```sh
