@@ -20,13 +20,24 @@
 # (the existing build-release workflow attaches the tarball). A failed adaption
 # never ships anything — the PR simply does not merge.
 #
-# Trigger: every 6 hours + manual dispatch.
+# Trigger: every 6 hours + manual dispatch (dispatch `force: true` to exercise
+# the pin/PR half even when no contact surface changed).
 name: upstream-track
 
 on:
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
+    inputs:
+      # The scheduled path stays silent when a release touches no contact
+      # surface (upgrade-core exits 3). This input forces the pin + re-vendor +
+      # full check + PR, so the PR-opening half of the tracker is exercised
+      # even for a tag that needs no adaption. `--force` skips only the
+      # contact-surface gate; every other guard still applies.
+      force:
+        description: 'Re-pin even when no contact surface changed (opens a tracking PR)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -84,7 +95,9 @@ jobs:
         working-directory: dsh-split-panes
         run: |
           set +e
-          node scripts/upgrade-core.mjs "$LATEST" "$NEW_SHA" --files compare.json --skip-check
+          FORCE=''
+          if [ "${{ inputs.force }}" = 'true' ]; then FORCE='--force'; fi
+          node scripts/upgrade-core.mjs "$LATEST" "$NEW_SHA" --files compare.json --skip-check $FORCE
           code=$?
           set -e
           echo "upgrade exit: $code"
@@ -163,7 +176,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         working-directory: dsh-split-panes
         run: |
-          BRANCH="chore/upstream-dsh-$LATEST"
+          BRANCH="chore/upstream-$LATEST"
           # A PR already open for this tag? Then nothing to do.
           if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "PR already open: $BRANCH"
@@ -180,11 +193,17 @@ jobs:
           git commit -m "chore: track $LATEST"
           git push origin "$BRANCH"
           BUNDLE_CHANGED="${{ steps.bundle.outputs.changed }}"
-          awk -v changed="$BUNDLE_CHANGED" -v tag="$LATEST" '
+          FORCED="${{ inputs.force }}"
+          awk -v changed="$BUNDLE_CHANGED" -v forced="$FORCED" -v tag="$LATEST" '
             BEGIN {
               print "## Upstream tracking: " tag
               print ""
               print "Contact surfaces changed (vendored renderer / conversation contracts), so the plugin was re-pinned and the renderer re-vendored."
+              if (forced == "true") {
+                print ""
+                print "> Opened by a forced manual dispatch: this tag touches no contact surface, so the"
+                print "> pin move is the only change. Merging is optional and shipping a release is not warranted."
+              }
               print ""
               print "- Bundle: " (changed == "true" ? "**changed** — merge then bump the patch version and release" : "unchanged — pin maintenance only, no release needed")
               print ""
