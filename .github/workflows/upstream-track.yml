@@ -1,0 +1,177 @@
+# Track DeepSeek Harness upstream releases and propose a plugin upgrade.
+#
+# The plugin vendors the core slot renderer verbatim (src/client/vendor/renderer)
+# and pins the harness build ref in build-release.yml. When upstream cuts a new
+# dsh-v* release, this workflow:
+#
+#   1. compares the new release's tree with the currently pinned commit and
+#      checks whether the CONTACT SURFACES this plugin consumes changed
+#      (the vendored renderer files + ui-conversation/ui-session/ui-layout
+#      contracts) — a tag that only bumps the version, or moves work outside
+#      those surfaces, is skipped silently (no empty PRs);
+#   2. if a surface changed: rewrites the pin, re-vendors the renderer
+#      (scripts/upgrade-core.mjs), checks out + builds the harness at the NEW
+#      commit, installs, and runs the full `pnpm run check`;
+#   3. if everything is green, opens a PR "chore: track dsh-vX.Y.Z" whose body
+#      tells you whether the built bundle changed (the signal for whether a
+#      patch release is meaningful).
+#
+# Releasing stays a manual, PR-gated action: merge the PR, then cut the release
+# (the existing build-release workflow attaches the tarball). A failed adaption
+# never ships anything — the PR simply does not merge.
+#
+# Trigger: every 6 hours + manual dispatch.
+name: upstream-track
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  PNPM_VERSION: 11.7.0
+  NODE_VERSION: 22
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        path: dsh-split-panes
+
+      - name: Resolve pin, latest upstream tag, and the contact-surface gate
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: dsh-split-panes
+        run: |
+          set -euo pipefail
+          OLD=$(sed -n 's/^ *ref: \([0-9a-f]\{40\}\).*/\1/p' .github/workflows/build-release.yml | head -1)
+          echo "current pin: $OLD"
+          if [ -z "$OLD" ]; then echo "no pinned ref found"; exit 0; fi
+
+          # Newest published dsh release (prereleases included).
+          LATEST=$(gh api 'repos/deepseek-ai/deepseek-harness/releases?per_page=100' --jq '[.[] | select(.tag_name | startswith("dsh-v")) | .tag_name][0]')
+          echo "latest upstream: $LATEST"
+          if [ -z "$LATEST" ]; then echo "no upstream dsh release found"; exit 0; fi
+
+          NEW_SHA=$(git ls-remote 'https://github.com/deepseek-ai/deepseek-harness.git' "refs/tags/$LATEST" | cut -f1)
+          echo "new sha: $NEW_SHA"
+          if [ -z "$NEW_SHA" ]; then echo "could not resolve $LATEST"; exit 0; fi
+          if [ "$OLD" = "$NEW_SHA" ]; then echo "already tracking $LATEST — nothing to do"; exit 0; fi
+
+          # GitHub compare file list feeds the contact-surface gate (exit 3 = skip).
+          gh api "repos/deepseek-ai/deepseek-harness/compare/$OLD...$NEW_SHA" > compare.json
+          printf 'old=%s\nlatest=%s\nnew_sha=%s\n' "$OLD" "$LATEST" "$NEW_SHA" >> "$GITHUB_ENV"
+
+      - name: Pin + re-vendor (skips when no contact surface changed)
+        id: upgrade
+        working-directory: dsh-split-panes
+        run: |
+          set +e
+          node scripts/upgrade-core.mjs "$LATEST" "$NEW_SHA" --files compare.json --skip-check
+          code=$?
+          set -e
+          echo "upgrade exit: $code"
+          if [ "$code" = "3" ]; then
+            echo "no contact surface changed — nothing to upgrade"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "$code" != "0" ]; then
+            echo "upgrade failed (exit $code)"
+            exit $code
+          fi
+
+      - name: Skip when untouched
+        if: steps.upgrade.outputs.skip == 'true'
+        run: echo "upstream release does not touch this plugin's surfaces — done"
+
+      - name: Checkout harness at the new pin
+        if: steps.upgrade.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ env.new_sha }}
+          path: dsh-split-panes/dsh2026/deepseek-harness
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        if: steps.upgrade.outputs.skip != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        if: steps.upgrade.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: dsh-split-panes/dsh2026/deepseek-harness/pnpm-lock.yaml
+
+      - name: Build harness
+        if: steps.upgrade.outputs.skip != 'true'
+        working-directory: dsh-split-panes/dsh2026/deepseek-harness
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build:lib
+
+      - name: Install plugin
+        if: steps.upgrade.outputs.skip != 'true'
+        working-directory: dsh-split-panes
+        run: pnpm install --frozen-lockfile
+
+      - name: Full check (drift + typecheck + tests + build)
+        if: steps.upgrade.outputs.skip != 'true'
+        working-directory: dsh-split-panes
+        run: pnpm run check
+
+      - name: Did the built bundle change?
+        if: steps.upgrade.outputs.skip != 'true'
+        id: bundle
+        working-directory: dsh-split-panes
+        run: |
+          if git diff --exit-code --quiet -- lib/client.js; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "bundle unchanged — pin-only tracking PR"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "bundle CHANGED — a patch release is meaningful after merge"
+          fi
+
+      - name: Open / update the tracking PR
+        if: steps.upgrade.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: dsh-split-panes
+        run: |
+          BRANCH="chore/upstream-dsh-$LATEST"
+          # A PR already open for this tag? Then nothing to do.
+          if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "PR already open: $BRANCH"
+            exit 0
+          fi
+          git config user.name 'dsh-split-panes bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git checkout -b "$BRANCH"
+          git add .github/workflows/build-release.yml scripts/sync-renderer-vendor.mjs scripts/upgrade-core.mjs src/client/vendor
+          git commit -m "chore: track $LATEST"
+          git push origin "$BRANCH"
+          BUNDLE_CHANGED="${{ steps.bundle.outputs.changed }}"
+          awk -v changed="$BUNDLE_CHANGED" -v tag="$LATEST" '
+            BEGIN {
+              print "## Upstream tracking: " tag
+              print ""
+              print "Contact surfaces changed (vendored renderer / conversation contracts), so the plugin was re-pinned and the renderer re-vendored."
+              print ""
+              print "- Bundle: " (changed == "true" ? "**changed** — merge then bump the patch version and release" : "unchanged — pin maintenance only, no release needed")
+              print ""
+              print "Release stays manual: merge this PR, then cut the release (build-release attaches the tarball)."
+            }' > PR_BODY.md
+          gh pr create --base main --head "$BRANCH" \
+            --title "chore: track $LATEST" \
+            --body-file PR_BODY.md

@@ -28,6 +28,7 @@
     "test": "vitest run",
     "vendor:renderer": "node scripts/sync-renderer-vendor.mjs",
     "vendor:renderer:check": "node scripts/sync-renderer-vendor.mjs --check",
+    "upgrade:core": "node scripts/upgrade-core.mjs",
     "check": "pnpm run vendor:renderer:check && pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "dsh": {

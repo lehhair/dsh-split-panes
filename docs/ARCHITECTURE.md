@@ -222,7 +222,36 @@ inject = ['slots', 'locale', 'sessions', 'uiSession']
 
 本地修改这三个文件**不支持**：要改行为就改 facade（`pane-host.ts`）。
 
-## 12. 验证
+## 12. 上游跟踪与升级（何时要重新同步）
+
+**不需要每次上游更新都同步**。插件与上游的接触面是有限的：
+
+| 接触面（变化才需要升级） | 为什么 |
+|---|---|
+| `ui-renderer/src/client/{bind,bindings,scoped-slots}.ts*` | vendored 渲染器本身 |
+| `ui-conversation`（`contract/`、`skeleton/`）、`ui-session/`、`ui-layout/` | 渲染器喂给原生组件的座位契约 |
+| 其它任何上游代码 | 与插件无关，忽略 |
+
+**自动跟踪**：`.github/workflows/upstream-track.yml` 每 6h 检测上游 `dsh-v*` release：
+
+1. 新 tag 的 commit 与当前钉死 ref 做 compare，**只**检查上面接触面
+   - 没变 → 静默跳过，不开 PR、不发版（避免空 PR / 空版本）
+   - 变了 → 改写 `build-release.yml` 钉死 ref + 重新 vendor（`scripts/upgrade-core.mjs`）
+2. 检出新 commit 的 harness 构建 → 安装 → 全量 `pnpm run check`
+   - 红 → **不开 PR**，需要先适配（见 §10）
+   - 绿 → 开 PR `chore: track dsh-vX.Y.Z`，正文写明构建产物 `lib/client.js` 是否变化（= 发 patch 版本是否有意义）
+3. 发版仍是**人工闸门**：合 PR 后手动 `gh release`（`build-release` 出 tarball）
+
+**本地一键**（开发时用，和 CI 同一套代码路径）：
+
+```sh
+node scripts/upgrade-core.mjs dsh-v0.1.6-alpha.1            # 从本地核心检出解析
+node scripts/upgrade-core.mjs dsh-v0.1.6-alpha.1 <sha>       # 显式指定 commit
+node scripts/upgrade-core.mjs --dry-run dsh-v0.1.6-alpha.1   # 只报要做什么
+node scripts/upgrade-core.mjs --force dsh-v0.1.6-alpha.1 <sha>  # 跳过接触面判定
+```
+
+## 13. 验证
 
 **单测/集成**（`pnpm test`）：`tests/pane-render.spec.tsx` 装配**真实 ui-conversation**，同时渲染两个 pane，断言各自的 header/消息流/composer 属于**自己的**会话、且没有 `[data-slot-error]`。
 
@@ -240,7 +269,7 @@ node .devruntime/node_modules/@deepseek-ai/dsh/lib/bin.js --profile panesdev --p
 node .dev/scenario.mjs "http://127.0.0.1:54999/?token=<printed>"
 ```
 
-## 13. 已知边界
+## 14. 已知边界
 
 1. **vendored 渲染器跟随上游**：靠 sync 脚本 + 漂移测试守门；上游若改 outlet 语义，测试会红，然后同步即可。
 2. **root binding 是重建的**：0.1.5 实际只有 `sessions` / `sessionPendingInteraction` / `workspaces` / keyed `resource`；第三方新增 root 贡献会缺（不崩，只是没有该 seat）。
@@ -249,7 +278,7 @@ node .dev/scenario.mjs "http://127.0.0.1:54999/?token=<printed>"
 5. **store 实例**：插件接管期间只有 pane facade 创建；若将来放开"未分屏时交还核心"，同一 handle×session 可能出现两份实例（持久化键相同）。
 6. **全屏单 pane**（OpenCode 有）：未实现，树结构已支持。
 
-## 14. 文件地图
+## 15. 文件地图
 
 ```
 src/client/
@@ -263,7 +292,9 @@ src/client/
   pane-layout-store.ts  # 分屏树 store（模块单例）
   SplitContainer.tsx / PaneDropOverlay.tsx / *Button.tsx（含 FullscreenPaneButton）/ icons.tsx / locales.ts
   vendor/renderer/      # 核心渲染器逐字节副本 + README（出处与同步说明）
-scripts/sync-renderer-vendor.mjs
+scripts/sync-renderer-vendor.mjs      # 逐字节同步 vendored 渲染器（--check 只比对）
+scripts/upgrade-core.mjs              # 一键升级：接触面判定 + 改 pin + 同步 +（可选）check
+.github/workflows/upstream-track.yml  # 每 6h 检测上游、开跟踪 PR
 tests/
   renderer-vendor.spec.ts  # 漂移守门
   pane-render.spec.tsx     # 真实 ui-conversation 装配下按 pane 渲染
