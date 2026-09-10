@@ -31,7 +31,8 @@
     "icons:sync": "node scripts/sync-icons.mjs",
     "icons:check": "node scripts/sync-icons.mjs --check",
     "upgrade:core": "node scripts/upgrade-core.mjs",
-    "check": "pnpm run vendor:renderer:check && pnpm run icons:check && pnpm run typecheck && pnpm run test && pnpm run build"
+    "bundle:portable": "node scripts/check-bundle-portability.mjs",
+    "check": "pnpm run vendor:renderer:check && pnpm run icons:check && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run bundle:portable"
   },
   "dsh": {
     "bundle": {

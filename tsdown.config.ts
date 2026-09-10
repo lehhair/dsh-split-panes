@@ -8,11 +8,28 @@
  * the same mechanism as the official client bundles.
  */
 import { readFile } from 'node:fs/promises'
-import { basename, dirname, resolve } from 'node:path'
+import { basename, dirname, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { transform } from 'lightningcss'
 import type { UserConfig } from 'tsdown'
 
 const PLUGIN_ID = '@dsh-external/dsh-split-panes'
+const PLUGIN_ROOT = fileURLToPath(new URL('.', import.meta.url))
+
+/**
+ * Repo-relative, slash-separated id for a file — the only file name that may
+ * reach the bundle.
+ *
+ * Two things leaked the checkout location into `lib/client.js`: lightningcss
+ * hashes the FILENAME it is given to build the CSS-module class names, and
+ * rolldown writes the virtual module id into a `//#region` comment. Either way
+ * the bundle built on Windows never matched the one built at
+ * /home/runner/work/..., the artifact was not reproducible, and the upstream
+ * tracker's "did the bundle change?" release signal was always yes.
+ */
+function stableId(abs: string): string {
+  return relative(PLUGIN_ROOT, abs).split(sep).join('/')
+}
 
 /** Module specifiers the dsh web shell shares into its frozen module table. */
 const PLATFORM_MODULES = [
@@ -89,15 +106,18 @@ export default [
       resolveId(source: string, importer: string | undefined) {
         if (!source.endsWith('.module.css')) return null
         const abs = importer !== undefined ? resolve(dirname(importer), source) : source
-        return CSS_VIRTUAL_PREFIX + abs + CSS_VIRTUAL_SUFFIX
+        return CSS_VIRTUAL_PREFIX + stableId(abs) + CSS_VIRTUAL_SUFFIX
       },
       async load(virtualId: string) {
         if (!virtualId.startsWith(CSS_VIRTUAL_PREFIX)) return null
-        const fileId = virtualId.slice(CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+        const stableName = virtualId.slice(CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+        const fileId = resolve(PLUGIN_ROOT, stableName)
         this.addWatchFile(fileId)
         const source = await readFile(fileId)
+        // `filename` drives the `[hash]` in the class names, so it must not
+        // contain machine-specific path text (see below).
         const { code, exports: cssExports } = transform({
-          filename: fileId,
+          filename: stableName,
           code: source,
           cssModules: { pattern: '[hash]_[local]' },
           minify: true,

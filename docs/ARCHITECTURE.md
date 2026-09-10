@@ -287,6 +287,7 @@ tracker 的 PR 只碰非 workflow 文件 → 不需要任何 PAT／App 就能开
 | `argv` 过滤用 `i !== filesIdx + 1` 排除 `--files` 的值 | `--files` 不存在时 `filesIdx+1 === 0`，**第一个位置参数（tag）被丢掉**：`upgrade:core dsh-v0.1.6` 报 usage，`upgrade:core <tag> <sha>` 把 sha 当 tag | 只有 `--files` 真存在时才跳过那两个槽位 |
 | 图标提取源（`ui-dockkit/TabPanel.tsx`、`ui-sidebar-right/SidebarRight.tsx`）不在接触面清单里 | 上游重画图标 → tracker 静默跳过，插件永远停在旧图标（alpha.2 那次就是这么漏的） | 两个文件加入 `CONTACT_SURFACES`；测试反过来校验"同步脚本读的每个核心文件都必须被清单覆盖" |
 | tracker 的 PR 里有 `.github/workflows/` 下的文件 | `git push` 被 GitHub 拒（`workflows` 权限），整条链路在最后一步死掉 | pin 挪进 `core-pin.json`；测试直接断言 `git add` 列表不含 `.github` |
+| 构建产物里嵌了本机路径（CSS 类名 hash 来自 lightningcss 的 `filename`；rolldown 把模块 id 写进 `//#region` 注释） | 本地 `E:\dev\...` 构建的 `lib/client.js` 与 CI 在 `/home/runner/work/...` 构建的**永不相同** → tracker 的"bundle 是否变化"信号永远为真、tarball 不可复现 | 传给 lightningcss / 放进虚拟模块 id 的一律是仓库相对路径（`tsdown.config.ts` 的 `stableId`）；`pnpm run bundle:portable` 守门，产物里出现盘符或 `/home/` 直接失败 |
 
 **本地一键**（开发时用，和 CI 同一套代码路径）：
 

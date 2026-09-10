@@ -12,7 +12,9 @@
  * shapes.
  */
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { CONTACT_SURFACES, parseArgs, readPin, rewritePin } from '../scripts/upgrade-core.mjs'
@@ -213,5 +215,30 @@ describe('the pin file', () => {
     expect(() => readPin(JSON.stringify({ tag: 'dsh-v0.1.6' }))).toThrow(/40-hex ref/)
     expect(() => readPin(JSON.stringify({ ref: 'a'.repeat(40) }))).toThrow(/missing a tag/)
     expect(() => readPin(JSON.stringify({ tag: 'dsh-v0.1.6', ref: '' }))).toThrow(/40-hex ref/)
+  })
+})
+
+describe('bundle portability', () => {
+  const check = (file: string): { status: number | null; output: string } => {
+    const result = spawnSync(process.execPath, ['scripts/check-bundle-portability.mjs', file], { cwd: root, encoding: 'utf8' })
+    return { status: result.status, output: `${result.stdout}${result.stderr}` }
+  }
+
+  it('passes the committed bundle', () => {
+    // The tracker's release signal is "rebuild and compare bytes", which only
+    // means something if a build is byte-identical wherever it runs.
+    const { status, output } = check('lib/client.js')
+    expect(output, output).toContain('carries no machine-specific paths')
+    expect(status).toBe(0)
+  })
+
+  it('flags a bundle that leaked a checkout path', () => {
+    const leaked = join(tmpdir(), 'dsh-panes-portability-probe.js')
+    writeFileSync(leaked, '//#region \\0dsh-css:/home/runner/work/x/src/client/A.module.css.mjs\nvar C:\\\\dev\\\\x = 1;\n')
+    const { status, output } = check(leaked)
+    expect(status).toBe(1)
+    expect(output).toContain('embeds machine-specific paths')
+    expect(output).toContain('/home/')
+    rmSync(leaked, { force: true })
   })
 })
