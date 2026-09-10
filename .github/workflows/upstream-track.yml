@@ -215,21 +215,29 @@ jobs:
           git push origin "$BRANCH"
           BUNDLE_CHANGED="${{ steps.bundle.outputs.changed }}"
           FORCED="${{ inputs.force }}"
-          awk -v changed="$BUNDLE_CHANGED" -v forced="$FORCED" -v tag="$LATEST" '
-            BEGIN {
-              print "## Upstream tracking: " tag
-              print ""
-              print "Contact surfaces changed (vendored renderer / conversation contracts), so the plugin was re-pinned and the renderer re-vendored."
-              if (forced == "true") {
-                print ""
-                print "> Opened by a forced manual dispatch: this tag touches no contact surface, so the"
-                print "> pin move is the only change. Merging is optional and shipping a release is not warranted."
-              }
-              print ""
-              print "- Bundle: " (changed == "true" ? "**changed** — merge then bump the patch version and release" : "unchanged — pin maintenance only, no release needed")
-              print ""
-              print "Release stays manual: merge this PR, then cut the release (build-release attaches the tarball)."
-            }' > PR_BODY.md
+          # Plain bash rather than awk: the body is the one artifact a human
+          # reads, and this way every branch can be produced and eyeballed
+          # locally (`bash` the block with FORCED/BUNDLE_CHANGED set).
+          {
+            echo "## Upstream tracking: $LATEST"
+            echo
+            if [ "$FORCED" = "true" ]; then
+              echo "Forced re-pin of the tracked core release: this tag touches no contact"
+              echo "surface, so the pin move is the only change. Merging is optional and"
+              echo "shipping a release is not warranted."
+            else
+              echo "Contact surfaces changed (vendored renderer / conversation contracts),"
+              echo "so the plugin was re-pinned and the renderer re-vendored."
+            fi
+            echo
+            if [ "$BUNDLE_CHANGED" = "true" ]; then
+              echo "- Bundle: **changed** — merge, then bump the patch version and release"
+            else
+              echo "- Bundle: unchanged — pin maintenance only, no release needed"
+            fi
+            echo
+            echo "Release stays manual: merge this PR, then cut the release (build-release attaches the tarball)."
+          } > PR_BODY.md
           gh pr create --base main --head "$BRANCH" \
             --title "chore: track $LATEST" \
             --body-file PR_BODY.md
