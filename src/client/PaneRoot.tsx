@@ -5,13 +5,13 @@
  * starts at the 'root' outlet and reads the winning root entry off the host
  * it was given. A pane is not the application shell, so the pane host hands
  * it THIS entry instead of ui-layout's AppFrame: a one-line component that
- * dispatches the 'conversation' slot through the kit-provided `renderSlot`.
+ * dispatches the 'main.conversation' slot through the kit-provided
+ * `renderSlot`.
  *
- * The dispatch then lands on the STOCK ConversationRoot entry — the pane
- * host's ledger view filters this plugin's own conversation shadow out — and
- * the core renderer's session-maybe branch renders it against the pane's
- * scope binding. Everything below that point (header, session body, composer
- * chain, hero) is the core's own outlet code.
+ * That slot hosts the STOCK ConversationRoot (ui-conversation registers it
+ * there, session-maybe scope); the core renderer's session-maybe branch then
+ * renders it against the pane's scope binding. Everything below that point
+ * (header, session body, composer chain, hero) is the core's own outlet code.
  */
 import type { ReactNode } from 'react'
 
@@ -27,5 +27,5 @@ export interface PaneRootProps {
  * @returns the conversation subtree for this pane's session.
  */
 export function PaneRoot(props: PaneRootProps): ReactNode {
-  return props.renderSlot?.('conversation', {}) ?? null
+  return props.renderSlot?.('main.conversation', {}) ?? null
 }

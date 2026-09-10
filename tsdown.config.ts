@@ -103,7 +103,14 @@ export default [
           minify: true,
         })
         const classMap: Record<string, string> = {}
-        for (const [local, exp] of Object.entries(cssExports ?? {})) classMap[local] = exp.name
+        // Sorted keys: lightningcss returns its CSS-module export map in a
+        // hash-dependent order, so serializing it verbatim made every build
+        // emit different bytes for identical sources (noisy diffs, and the
+        // upgrade script's "did the bundle change?" release signal always
+        // said yes). The values are content hashes already; only the key
+        // order needed pinning.
+        const exports0 = cssExports ?? {}
+        for (const local of Object.keys(exports0).sort()) classMap[local] = exports0[local]!.name
         const tagId = `${PLUGIN_ID}/${basename(fileId)}`
         return [
           `const css = ${JSON.stringify(code.toString())};`,

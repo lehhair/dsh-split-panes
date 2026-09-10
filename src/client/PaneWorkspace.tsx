@@ -87,9 +87,9 @@ export interface PaneWorkspaceInjected {
   resolveRowSession: (row: HTMLElement) => SessionId | null
 }
 
-/** Full composed props: runtime + shared-store inject + locale. */
+/** Full composed props: runtime (main panel, root scope) + inject + locale. */
 export type PaneWorkspaceProps =
-  & PropsRuntime<'conversation'>
+  & PropsRuntime<'main'>
   & InjectFace<PaneWorkspaceInjected>
   & PropsLocale<'panes'>
 

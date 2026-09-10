@@ -153,11 +153,15 @@ export function apply(ctx: ClientContext): void {
   // panel + its header-corner button) must resolve to ONE instance.
   installStoreSharing(ctx)
 
-  // The conversation occupant. Priority -1 keeps the stock ConversationRoot
-  // registered at 0 (the pane renderer elects it inside each pane), and makes
-  // this entry the slot's winner so the core renders the pane workspace.
+  // The main-panel occupant. alpha.2 renders the center column through the
+  // 'main' keyed slot; the reserved key 'conversation' hosts the official
+  // ConversationPanel (which just delegates to 'main.conversation'). Shadow it
+  // at priority -1 to make the pane workspace the default main panel; inside
+  // each pane we still render the official ConversationRoot captured from
+  // 'main.conversation'.
   ctx.slots.register({
-    name: 'conversation',
+    name: 'main',
+    key: 'conversation',
     priority: TAKEOVER_PRIORITY,
     locale: NS,
     inject: (): PaneWorkspaceInjected => operations,

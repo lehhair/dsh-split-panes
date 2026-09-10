@@ -79,16 +79,20 @@ renderRoot(host)
 
 ## 4. 架构总览
 
+自核心 `0.1.5-alpha.2` 起，中央列不再直接渲染 `conversation` 槽，而是渲染 **`main`（keyed / root scope）**：
+`main` 的 `'conversation'` key 承载官方 `ConversationPanel`（一个纯壳，只 `renderSlot('main.conversation')`），
+会话根组件 `ConversationRoot` 注册在 **`main.conversation`（single / session-maybe）**。
+
 ```
-conversation 槽（ui-layout 声明，session-maybe）
- └─ PaneWorkspace（插件注册，priority -1，永久占据）
+main 槽 key='conversation'（ui-layout 声明 keyed root）
+ └─ PaneWorkspace（插件注册，priority -1，shadow 官方 ConversationPanel，永久占据）
       ├─ 单 leaf：SinglePane（渲染 current，逐字节等同原生）
       └─ 分屏：SplitContainer → 每个 leaf 一个 PaneFrame
            └─ renderPane(pane.sessionId, paneId)
                 └─ PaneConversation（按 (ctx, binding) memo）
                      └─ createSlotRenderer().renderRoot(paneHost, {})   ← vendored 核心渲染器
                           └─ RootOutlet → 合成 root entry（PaneRoot）
-                               └─ renderSlot('conversation', {})
+                               └─ renderSlot('main.conversation', {})
                                     └─ SessionMaybeEntry(原生 ConversationRoot)   ← binding = 本 pane 的
                                          ├─ 原生 header（crumbs/tabs/actions/corner）
                                          ├─ 原生消息流（session → view → chat.node）
@@ -103,6 +107,10 @@ conversation 槽（ui-layout 声明，session-maybe）
 | **host 层** | `pane-host.ts` + `root-binding.ts` | 合成 `SlotRendererHost`：root 槽、pane scope adapter、store 解析、崩溃 abdication |
 | **渲染层** | `vendor/renderer/*` + `PaneConversation.tsx` + `PaneRoot.tsx` | 核心渲染器逐字节副本 + 每个 pane 的实例化 |
 | **容器层** | `PaneWorkspace.tsx` + `pane-layout-store.ts` | 分屏树、焦点路由、拖拽、快捷键（**不含任何对话布局**） |
+
+> **为什么 shadow `main` 而不是注册新 key**：`main` 是 keyed 槽，同 key 不同 priority 时**低 priority 赢**（cell shadowing），
+> 所以在 `key='conversation'` 上以 priority -1 注册即可成为默认主面板——不改 sidebar / AppFrame 的选择逻辑，
+> 官方 `ConversationPanel` 仍留在账本上（pane 内渲染的是它的子槽 `main.conversation` 里的 `ConversationRoot`）。
 
 ---
 
@@ -188,16 +196,16 @@ const PANE_ROOT_ENTRY = {
 inject = ['slots', 'locale', 'sessions', 'uiSession']
   （workspaces / resources 用 ctx.inject 反应式绑定，不进硬依赖）
 
-1. conversation 槽（priority -1，永久占据）
+1. main 槽 key='conversation'（priority -1，shadow 官方 ConversationPanel，永久占据）
    - inject 返回 operations：openSession/splitWithNew/splitFocused/closeFocused/
-     hasSplit/usePaneStore/paneActions/renderPane/resolveRowSession
+     hasSplit/toggleFullscreen/isFullscreen/usePaneStore/paneActions/renderPane/resolveRowSession
 2. conversation.session.header.actions（list，session scope）
-   - panes-split / panes-split-v / panes-close，每个声明 locale: NS
+   - panes-split / panes-split-v / panes-fullscreen / panes-close，每个声明 locale: NS
 3. 拖拽通道（document dragstart capture）
-4. 全局快捷键（window keydown，编辑目标豁免）
+4. 全局快捷键（window keydown + Escape 退全屏；编辑目标豁免）
 ```
 
-卸载语义：插件卸载 → priority -1 条目消失 → 原生 ConversationRoot 恢复渲染。
+卸载语义：插件卸载 → priority -1 条目消失 → 官方 ConversationPanel 重新成为 `main` 赢家，原生单列恢复。
 
 ---
 
@@ -210,6 +218,9 @@ inject = ['slots', 'locale', 'sessions', 'uiSession']
 | 输入框乱渲染 / 内容消失（v0.4.0） | 手写 dispatch 与核心漂移（`t` 每帧新身份 → `memo(InputBar)` 每帧重渲染；keyed hook 每帧重订阅） | 不要手写 dispatch，vendor 渲染器 |
 | pane 内多出 `[data-slot="root"]` / `[data-slot="conversation"]` 锚点 | `renderRoot`/`SlotOutlet` 自带 `display:contents` 锚点 | 已核对核心 CSS：只有 `[data-slot='conversation.session']` 一条属性选择器，且在 ConversationRoot 内部，不受影响 |
 | 空白会话的 pane 没有 header | 核心对 blank 会话隐藏 header（`.headerHidden`） | pane 对 `sessionId === null` **或** blank 会话渲染插件自己的新建对话 header |
+| `slot "conversation" is not declared`（0.1.5-alpha.2） | alpha.2 把中央列改成 keyed 的 `main` 槽，会话根挪到 `main.conversation`；插件仍旧注册 `conversation` | 接管面改为 `main`（key），每 pane 捕获 `main.conversation` 的 ConversationRoot |
+| vendored 文件"漂移"但内容没改（Windows） | git autocrlf 把工作区副本改成 CRLF，纯字节比对误报 | 漂移比对先归一化换行（`tests/renderer-vendor.spec.ts` + sync 脚本） |
+| `lib/client.js` 每次构建字节都不同 | CSS Modules 类名映射对象的 key 顺序来自 lightningcss 的 hash 依赖迭代顺序 | 序列化前对 key 排序（`tsdown.config.ts`），构建变确定性 |
 
 ---
 

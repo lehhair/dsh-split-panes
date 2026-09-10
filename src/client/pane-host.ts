@@ -72,11 +72,11 @@ export interface PaneHostOptions {
   readonly onCrash?: ((key: string, entry: StoredEntry, error: unknown) => void) | undefined
 }
 
-/** The synthetic 'root' occupant: a one-line dispatch into 'conversation'. */
+/** The synthetic 'root' occupant: a one-line dispatch into 'main.conversation'. */
 const PANE_ROOT_ENTRY: StoredEntry = {
   component: PaneRoot,
   options: { id: 'panes.root' },
-  children: { 'conversation': { kind: 'single', scope: 'session-maybe' } },
+  children: { 'main.conversation': { kind: 'single', scope: 'session-maybe' } },
 }
 
 /** The built-in 'root' spec (SlotCore seeds it; a pane host must answer for it). */

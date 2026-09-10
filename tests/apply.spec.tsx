@@ -7,9 +7,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { fireEvent } from '@testing-library/react'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import {
-  SlotTestRuntime, usePinnedBrowserLanguages,
+  SlotTestRuntime, stubSettingsScope, usePinnedBrowserLanguages,
 } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import {
+  apply as applyConversation, inject as conversationInject,
+} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { apply, inject } from '../src/client/index.ts'
 import { SESSION_DRAG_TYPE } from '../src/client/session-row.ts'
 
@@ -20,6 +23,11 @@ async function bench() {
   const locale = new LocaleRuntime(runtime.ctx)
   runtime.ctx.provide('locale', locale)
   runtime.slots.installLocale(locale)
+  runtime.ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
+  runtime.ctx.provide('uiWorkspace', {
+    openSession: async () => {},
+    openWorkspace: async (_workspaceId: unknown, beforeOpen: (id: SessionId) => void) => { beforeOpen('s1' as SessionId) },
+  } as never)
   await runtime.sessions.add({
     id: 's1' as SessionId,
     summary: { title: 'Fix the build', displayTitle: 'Fix the build', cwd: '/dev' },
@@ -28,34 +36,13 @@ async function bench() {
     id: 's2' as SessionId,
     summary: { title: 'Second', displayTitle: 'Second', cwd: '/dev' },
   }, { current: false })
-  // Declare the layout-owned conversation slot (single, session-maybe) and —
-  // as ui-conversation's ConversationRoot does in production — the child
-  // slots (session, header, composer) it owns. The plugin wins the slot but
-  // relies on these declarations + occupant registrations surviving.
+  // alpha.2: the center column is the keyed 'main' slot; the conversation root
+  // 'main.conversation' is declared by ui-conversation itself.
   await runtime.root.declare({
-    'conversation': { kind: 'single', scope: 'session-maybe' },
+    'main': { kind: 'keyed', scope: 'root' },
   }, (_props: { renderSlot?: unknown }) => null)
-  await runtime.slots.inject('conversation' as never, function* () {
-    yield runtime.slots.register({
-      name: 'conversation',
-      children: {
-        'conversation.session': { kind: 'single', scope: 'session' },
-        'conversation.session.header': { kind: 'single', scope: 'session' },
-        'conversation.composer': { kind: 'chain', scope: 'session' },
-        'conversation.composer.bar': { kind: 'single', scope: 'session-maybe' },
-        'conversation.input.dock': { kind: 'list', scope: 'session' },
-        'conversation.hero.brand.mark': { kind: 'single', scope: 'root' },
-        'conversation.hero.workspace': { kind: 'single', scope: 'root' },
-        'conversation.hero.agentPreset': { kind: 'single', scope: 'root' },
-      } as never,
-    } as never, (() => null) as never)
-    yield runtime.slots.register({
-      name: 'conversation.session.header',
-      children: {
-        'conversation.session.header.actions': { kind: 'list', scope: 'session' },
-      } as never,
-    } as never, (() => null) as never)
-  })
+  await runtime.mount({ inject: conversationInject, apply: applyConversation })
+  await runtime.flush()
   return runtime
 }
 
@@ -68,13 +55,15 @@ describe('ui-panes apply', () => {
     const runtime = await bench()
     await runtime.mount({ inject: [...inject], apply })
     await runtime.flush()
-    // The plugin's occupant is always registered; the stock ConversationRoot
-    // stays on the ledger (the pane renderer elects it inside each pane).
-    const conversation = runtime.slots.entries('conversation')
-    expect(conversation).toHaveLength(2)
-    const panesEntry = conversation.find(e => (e as { options?: { priority?: number } }).options?.priority === -1)
+    // The plugin shadows the 'main' keyed slot's 'conversation' cell; the
+    // stock ConversationPanel stays on the ledger for other cells' fallback.
+    const main = runtime.slots.entries('main')
+    const panesEntry = main.find(e => {
+      const o = (e as { options?: { key?: string; priority?: number } }).options ?? {}
+      return o.key === 'conversation' && o.priority === -1
+    })
     expect(panesEntry).toBeDefined()
-    expect(runtime.slots.entriesOfSlot('conversation')[0]).toBe(panesEntry)
+    expect(runtime.slots.entriesOfSlot('main')).toContain(panesEntry)
 
     const splitButton = runtime.slots.entries('conversation.session.header.actions' as never)
       .find(e => (e as { options?: { id?: string } }).options?.id === 'panes-split')

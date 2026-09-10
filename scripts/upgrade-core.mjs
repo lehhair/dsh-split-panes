@@ -118,7 +118,18 @@ function main() {
 
   // ---- 4. check ----
   if (!skipCheck && !dryRun) {
-    const check = spawnSync(pnpmCommand(), ['run', 'check'], { cwd: PLUGIN_ROOT, stdio: 'inherit' })
+    const check = spawnSync(pnpmCommand(), ['run', 'check'], {
+      cwd: PLUGIN_ROOT,
+      stdio: 'inherit',
+      // Windows: pnpm is a .cmd shim, and spawnSync cannot execute it without
+      // a shell (it fails EINVAL with a null status, which would read as a
+      // check failure without ever running the check).
+      ...(process.platform === 'win32' ? { shell: true } : {}),
+    })
+    if (check.error !== undefined) {
+      console.error(`could not run 'pnpm run check': ${check.error.message}`)
+      process.exit(1)
+    }
     if (check.status !== 0) {
       console.error(`
 check FAILED after tracking ${tag}.
@@ -148,9 +159,9 @@ function currentPin(workflow) {
   return undefined
 }
 
-/** 'pnpm' on POSIX, 'pnpm.cmd' on Windows (spawnSync wants a real executable). */
+/** The package-manager command (Windows resolves the .cmd shim under `shell`). */
 function pnpmCommand() {
-  return process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
+  return 'pnpm'
 }
 
 function contactSurfacesTouched(oldSha, newSha, filesJson) {

@@ -44,8 +44,8 @@ jobs:
           # dsh-v0.1.5-alpha.1; the plugin's link: devDependencies resolve into
           # this checkout at ../dsh2026/deepseek-harness/... — the layout this
           # repo's pnpm-lock.yaml records. Pinned (harness master moves; a
-          # pinned build keeps releases reproducible).
-          ref: 5dda764ed3aa172535a7967b06ff95d9cbfe536a
+          # b2e3b2a0125854567a4a5fcba75782e42fe84901; keep in sync with the vendored renderer.
+          ref: b2e3b2a0125854567a4a5fcba75782e42fe84901
           path: dsh2026/deepseek-harness
           fetch-depth: 1
 

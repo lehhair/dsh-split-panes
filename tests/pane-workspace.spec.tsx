@@ -96,14 +96,9 @@ function mount(initialCurrent: string | undefined = 's1') {
       usePaneStore={usePaneStore}
       paneActions={instance.actions}
       useSessions={((sel: (s: unknown) => unknown) => sel(sessionState(currentRef.current))) as PaneWorkspaceProps['useSessions']}
-      useSession={neverHook}
-      useConversation={neverHook}
-      useInput={neverHook}
-      useProjection={neverHook}
-      inputActions={undefined}
-      sessionId={undefined}
       useSessionPendingInteraction={neverHook}
       useWorkspaces={neverHook}
+      usePanelInfo={neverHook}
       openSession={openSession}
       splitWithNew={splitWithNew}
       splitFocused={splitFocused}

@@ -41,7 +41,10 @@ async function bench() {
   runtime.ctx.provide('locale', locale)
   runtime.slots.installLocale(locale)
   runtime.ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
-  runtime.ctx.provide('uiWorkspace', { connectWorkspace: async () => FIRST } as never)
+  runtime.ctx.provide('uiWorkspace', {
+    openSession: async () => {},
+    openWorkspace: async (_workspaceId: unknown, beforeOpen: (id: SessionId) => void) => { beforeOpen(FIRST) },
+  } as never)
   for (const [id, title] of [[FIRST, 'Alpha session'], [SECOND, 'Beta session']] as const) {
     await runtime.sessions.add({
       id,
@@ -49,8 +52,11 @@ async function bench() {
       session: { loadOlder: async () => {}, prompt: async () => ({ ok: true, value: { accepted: true } }) },
     }, { current: false })
   }
+  // alpha.2: the center column is the keyed 'main' slot (declared by
+  // ui-layout in the app; the conversation root `main.conversation` is
+  // declared by ui-conversation itself when it mounts).
   await runtime.root.declare({
-    'conversation': { kind: 'single', scope: 'session-maybe' },
+    'main': { kind: 'keyed', scope: 'root' },
   }, (_props: { renderSlot?: unknown }) => null)
   await runtime.mount({ inject: conversationInject, apply: applyConversation })
   await runtime.flush()
@@ -64,10 +70,13 @@ async function bench() {
   return runtime
 }
 
-/** The plugin's conversation occupant + its injected operations face. */
+/** The plugin's main-panel occupant + its injected operations face. */
 function panesOps(runtime: SlotTestRuntime) {
-  const entry = runtime.slots.entries('conversation')
-    .find(candidate => (candidate as { options?: { priority?: number } }).options?.priority === -1)
+  // The plugin shadows 'main' key='conversation' at priority -1; that is the entry.
+  const entry = runtime.slots.entries('main')
+    .find(candidate =>
+      (candidate as { options?: { key?: string; priority?: number } }).options?.key === 'conversation'
+      && (candidate as { options?: { priority?: number } }).options?.priority === -1)
   if (entry === undefined) throw new Error('panes occupant missing')
   const inject = (entry as unknown as { inject?: (...args: unknown[]) => unknown }).inject
   if (inject === undefined) throw new Error('panes occupant has no inject face')
@@ -133,7 +142,7 @@ describe('pane render path over the real conversation assembly', () => {
       // The plugin does not touch the real root slot; the synthetic entry is
       // what a pane host serves instead of the shell.
       expect(rootEntry).not.toBe(PANE_ROOT_SLOT_ENTRY)
-      expect(PANE_ROOT_SLOT_ENTRY.children?.['conversation']).toMatchObject({
+      expect(PANE_ROOT_SLOT_ENTRY.children?.['main.conversation']).toMatchObject({
         kind: 'single',
         scope: 'session-maybe',
       })

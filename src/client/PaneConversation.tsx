@@ -4,11 +4,12 @@
  *
  * The renderer instance is the vendored core `createSlotRenderer()` product
  * (see `vendor/renderer/README.md`); the host is `createPaneHost` with this
- * pane's session binding. The renderer's root outlet dispatches 'conversation',
- * which elects the STOCK ConversationRoot (the pane host filters this
- * plugin's own shadow out of its ledger view) under the pane's scope — so the
- * native header, session body, composer chain and hero render here exactly as
- * they do for the current session in an unmodified shell.
+ * pane's session binding. The renderer's root outlet dispatches
+ * 'main.conversation', which elects the STOCK ConversationRoot (ui-conversation
+ * registers it there; the pane host filters this plugin's own main-panel
+ * shadow out of its ledger view) under the pane's scope — so the native
+ * header, session body, composer chain and hero render here exactly as they
+ * do for the current session in an unmodified shell.
  *
  * The host is memoized per (deps, pane binding): the renderer caches inject
  * faces, store instances and hooks per host identity, so a stable host is
