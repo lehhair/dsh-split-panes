@@ -7,7 +7,7 @@
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls the ui-conversation SlotMap merge (header actions slot).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseFill14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './PaneWorkspace.module.css'
 import type { PaneWorkspaceInjected } from './PaneWorkspace.tsx'
 
@@ -32,7 +32,7 @@ export function ClosePaneButton({ closeFocused, hasSplit, t }: ClosePaneButtonPr
       title={t('pane.close')}
       onClick={() => { closeFocused() }}
     >
-      <IconCloseOutline16 />
+      <IconCloseFill14 />
     </button>
   )
 }

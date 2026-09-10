@@ -120,7 +120,8 @@
 }
 
 /* Header split affordance (the stock conversation header's actions row,
-   and the hero header's action row). */
+   and the hero header's action row). Same box as the core's own panel
+   controls: 28×28 with 6px padding, so the 16px glyphs sit identically. */
 .splitButton,
 .closeButton,
 .heroButton {
@@ -129,7 +130,7 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  padding: 0;
+  padding: 6px;
   border: none;
   border-radius: 6px;
   background: transparent;

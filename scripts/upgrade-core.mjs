@@ -113,8 +113,12 @@ function main() {
   if (!dryRun) {
     const sync = spawnSync(process.execPath, ['scripts/sync-renderer-vendor.mjs'], { cwd: PLUGIN_ROOT, stdio: 'inherit' })
     if (sync.status !== 0) process.exit(sync.status ?? 1)
+    // The pane-chrome icons are extracted from the core too (they drifted once
+    // when 0.1.5-alpha.2 redrew the right sidebar's glyphs).
+    const icons = spawnSync(process.execPath, ['scripts/sync-icons.mjs'], { cwd: PLUGIN_ROOT, stdio: 'inherit' })
+    if (icons.status !== 0) process.exit(icons.status ?? 1)
   }
-  console.log(`${dryRun ? '[dry-run] would sync the' : 'vendored'}  renderer`)
+  console.log(`${dryRun ? '[dry-run] would sync the' : 'vendored'}  renderer + icons`)
 
   // ---- 4. check ----
   if (!skipCheck && !dryRun) {

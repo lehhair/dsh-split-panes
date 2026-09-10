@@ -1,7 +1,7 @@
 {
   "name": "@dsh-external/dsh-split-panes",
   "description": "DSH split-pane conversation plugin: PiUI-style multi-pane conversation surface — split/stack panes, per-pane sessions, sidebar session drag & drop, single-row fused header. No core patch required: each pane runs the core's own slot renderer against a pane-scoped host.",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -28,8 +28,10 @@
     "test": "vitest run",
     "vendor:renderer": "node scripts/sync-renderer-vendor.mjs",
     "vendor:renderer:check": "node scripts/sync-renderer-vendor.mjs --check",
+    "icons:sync": "node scripts/sync-icons.mjs",
+    "icons:check": "node scripts/sync-icons.mjs --check",
     "upgrade:core": "node scripts/upgrade-core.mjs",
-    "check": "pnpm run vendor:renderer:check && pnpm run typecheck && pnpm run test && pnpm run build"
+    "check": "pnpm run vendor:renderer:check && pnpm run icons:check && pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "dsh": {
     "bundle": {
