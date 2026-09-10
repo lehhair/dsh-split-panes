@@ -42,7 +42,8 @@ jobs:
     steps:
       - name: Checkout plugin
         uses: actions/checkout@v4
-        path: dsh-split-panes
+        with:
+          path: dsh-split-panes
 
       - name: Resolve pin, latest upstream tag, and the contact-surface gate
         id: resolve
