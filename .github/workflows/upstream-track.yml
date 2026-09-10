@@ -96,7 +96,11 @@ jobs:
         with:
           repository: deepseek-ai/deepseek-harness
           ref: ${{ env.new_sha }}
-          path: dsh-split-panes/dsh2026/deepseek-harness
+          # Sibling of the plugin checkout: the plugin's devDependencies are
+          # `link:../dsh2026/deepseek-harness/...` (same layout as
+          # build-release.yml). Nesting it under the plugin dir would resolve
+          # the links one level too deep.
+          path: dsh2026/deepseek-harness
           fetch-depth: 1
 
       - name: Setup pnpm
@@ -111,11 +115,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-          cache-dependency-path: dsh-split-panes/dsh2026/deepseek-harness/pnpm-lock.yaml
+          cache-dependency-path: dsh2026/deepseek-harness/pnpm-lock.yaml
 
       - name: Build harness
         if: steps.upgrade.outputs.skip != 'true'
-        working-directory: dsh-split-panes/dsh2026/deepseek-harness
+        working-directory: dsh2026/deepseek-harness
         run: |
           pnpm install --frozen-lockfile
           pnpm run build:lib
@@ -158,7 +162,11 @@ jobs:
           git config user.name 'dsh-split-panes bot'
           git config user.email 'actions@users.noreply.github.com'
           git checkout -b "$BRANCH"
-          git add .github/workflows/build-release.yml scripts/sync-renderer-vendor.mjs scripts/upgrade-core.mjs src/client/vendor
+          # Everything the upgrade flow can rewrite: the pin, the vendored
+          # renderer, the extracted pane icons, and the two sync scripts.
+          git add .github/workflows/build-release.yml \
+                  scripts/sync-renderer-vendor.mjs scripts/sync-icons.mjs scripts/upgrade-core.mjs \
+                  src/client/vendor src/client/icons.tsx
           git commit -m "chore: track $LATEST"
           git push origin "$BRANCH"
           BUNDLE_CHANGED="${{ steps.bundle.outputs.changed }}"
