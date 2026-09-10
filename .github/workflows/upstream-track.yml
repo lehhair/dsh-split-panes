@@ -61,7 +61,16 @@ jobs:
           echo "latest upstream: $LATEST"
           if [ -z "$LATEST" ]; then echo "no upstream dsh release found"; exit 0; fi
 
-          NEW_SHA=$(git ls-remote 'https://github.com/deepseek-ai/deepseek-harness.git' "refs/tags/$LATEST" | cut -f1)
+          # Peel to the COMMIT: the plain tag ref of an annotated tag is the tag
+          # object's sha, which never equals the commit pinned in the workflow —
+          # the "already tracking" check would never fire and the compare below
+          # would run against a tag object. `^{}` gives the commit; a
+          # lightweight tag has no peeled ref, so fall back to the plain one.
+          TAG_REPO='https://github.com/deepseek-ai/deepseek-harness.git'
+          NEW_SHA=$(git ls-remote "$TAG_REPO" "refs/tags/$LATEST^{}" | cut -f1)
+          if [ -z "$NEW_SHA" ]; then
+            NEW_SHA=$(git ls-remote "$TAG_REPO" "refs/tags/$LATEST" | cut -f1)
+          fi
           echo "new sha: $NEW_SHA"
           if [ -z "$NEW_SHA" ]; then echo "could not resolve $LATEST"; exit 0; fi
           if [ "$OLD" = "$NEW_SHA" ]; then echo "already tracking $LATEST — nothing to do"; exit 0; fi
