@@ -192,8 +192,12 @@ jobs:
         working-directory: dsh-split-panes
         run: |
           BRANCH="chore/upstream-$LATEST"
-          # A PR already open for this tag? Then nothing to do.
-          if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          # Only an OPEN PR means there is nothing to do. `gh pr view <branch>`
+          # also matches a CLOSED one, so closing a tracking PR (or deleting its
+          # branch) used to make this step exit early forever: the tracker went
+          # silent for that tag instead of re-opening the PR.
+          OPEN_PRS=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number --jq 'length')
+          if [ "$OPEN_PRS" != "0" ]; then
             echo "PR already open: $BRANCH"
             exit 0
           fi

@@ -111,6 +111,16 @@ describe('upstream tracker workflow', () => {
     expect(sources.filter((source) => !CONTACT_SURFACES.some((prefix) => source.startsWith(prefix)))).toEqual([])
   })
 
+  it('looks only for OPEN pull requests before deciding to skip', () => {
+    // `gh pr view <branch>` matches closed PRs too: a closed (or branch-deleted)
+    // tracking PR made the step exit early forever, so the tracker went silent
+    // for that tag instead of re-opening.
+    const workflow = read(TRACK)
+    const guard = workflow.slice(workflow.indexOf('BRANCH="chore/upstream-'))
+    expect(guard.slice(0, guard.indexOf('git config user.name'))).toMatch(/gh pr list[\s\S]*--state open/)
+    expect(guard).not.toContain('gh pr view "$BRANCH"')
+  })
+
   it('never stages a workflow file, which GITHUB_TOKEN cannot push', () => {
     // GitHub rejected the tracker's push outright:
     //   refusing to allow a GitHub App to create or update workflow
