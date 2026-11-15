@@ -53,7 +53,12 @@ const CLIENT_BUNDLE = join(PLUGIN_ROOT, 'lib/client.js')
 export const CONTACT_SURFACES = [
   'packages/client/ui-renderer/src/client/bind.ts',
   'packages/client/ui-renderer/src/client/bindings.tsx',
+  'packages/client/ui-renderer/src/client/errors.ts',
   'packages/client/ui-renderer/src/client/scoped-slots.tsx',
+  // pane-host.ts reads SlotRegistry.hostFace() and its SlotCore's abdicated set
+  // (TS-private; see docs/ARCHITECTURE.md 1.2).
+  'packages/client/ui-renderer/src/client/registry.ts',
+  'packages/client/ui-slots/src/index.ts',
   'packages/client/ui-conversation/src/client/contract/',
   'packages/client/ui-conversation/src/client/skeleton/',
   'packages/client/ui-session/src/client/',

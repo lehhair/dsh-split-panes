@@ -22,6 +22,8 @@
 | **只用公开面** | 只用 `ctx.*` 服务、slot registry、公开类型 |
 | **渲染语义不自己写** | 不复刻 outlet 的合成顺序（那是漂移的来源） |
 
+**例外（dsh 0.2.2-rc.3 起，仅限 slot registry 一处）**：`pane-host.ts` 的 `registryHostFace()` 读取 `SlotRegistry` 在 TypeScript 层面 `private` 的 `hostFace()`，`registryCoreAbdicated()` 读取其 `_core.abdicated`（core 的崩溃退位集合）。退位集合必须读原件：用公开的 `onEntryError` 镜像会在插件重载后丢失历史退位，pane 选举就会复活已退位的条目。原因是 rc.3 的 `SlotRendererHost` 新增 Factory 成员（`factoryOf`/`factoryStoreOf`/`retainFactoryOccurrence`…），它们绑定 registry 私有的 store 与 Factory 轴，而会话主体 `conversation.content` 本身就是 Factory，没有可替代的公开面；若在插件里重写这些轴，会 fork 核心状态，违反上面的“渲染语义不自己写”。读取到的就是核心渲染器自己拿到的那个对象，pane host 仅在其上覆盖 root、session scope、排除项和 pane 本地退位。核心若移除这两处，插件在加载时报 `unsupported core version`，不会静默错渲染。该方法已登记为上游接触面，跟随 `upgrade:core` 一并复核。
+
 ---
 
 ## 2. 核心渲染机制调研：为什么没有"按 id 渲染"的缝

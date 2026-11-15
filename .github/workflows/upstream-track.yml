@@ -49,7 +49,7 @@ permissions:
 
 env:
   PNPM_VERSION: 11.7.0
-  NODE_VERSION: 22
+  NODE_VERSION: 24
 
 jobs:
   track:

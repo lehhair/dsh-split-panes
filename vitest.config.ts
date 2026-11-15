@@ -13,6 +13,8 @@ export default defineConfig({
     include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx'],
     environment: 'node',
     pool: 'threads',
+    // jsdom lacks document.fonts; ui-conversation's composer listens to it.
+    setupFiles: ['./tests/setup-dom.ts'],
   },
   resolve: {
     tsconfigPaths: true,
@@ -33,6 +35,7 @@ export default defineConfig({
       '@deepseek-ai/dsh-client-ui-renderer/client': `${core}/packages/client/ui-renderer/src/client/index.ts`,
       '@deepseek-ai/dsh-client-ui-session/client': `${core}/packages/client/ui-session/src/client/index.ts`,
       '@deepseek-ai/dsh-client-ui-conversation/client': `${core}/packages/client/ui-conversation/src/client/index.ts`,
+      '@deepseek-ai/dsh-client-ui-context-menu/client': `${core}/packages/client/ui-context-menu/src/client/index.ts`,
       '@deepseek-ai/dsh-client-ui-chat/client': `${core}/packages/client/ui-chat/src/client/index.ts`,
       '@deepseek-ai/dsh-api-session-controller/client': `${core}/packages/api/session-controller/src/client/index.ts`,
       '@deepseek-ai/dsh-session/types': `${core}/packages/core/session/src/types.ts`,

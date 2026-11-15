@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 const core = fileURLToPath(new URL('../../dsh2026/deepseek-harness/packages/client/ui-renderer/src/client/', import.meta.url))
 const vendored = fileURLToPath(new URL('../src/client/vendor/renderer/', import.meta.url))
 
-const FILES = ['bind.ts', 'bindings.tsx', 'scoped-slots.tsx'] as const
+const FILES = ['bind.ts', 'bindings.tsx', 'errors.ts', 'scoped-slots.tsx'] as const
 
 /** Normalize platform line endings so a CRLF working copy matches LF source. */
 const normalize = (text: string): string => text.replace(/\r\n/g, '\n')

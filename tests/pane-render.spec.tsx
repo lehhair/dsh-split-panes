@@ -8,13 +8,15 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import { createElement } from 'react'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import {
-  SlotTestRuntime, stubSettingsScope, usePinnedBrowserLanguages,
+  SlotTestRuntime, stubConfigForm, usePinnedBrowserLanguages,
 } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
   apply as applyConversation, inject as conversationInject,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { apply as applyMenus, inject as menusInject } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import { apply as applyPanes, inject as panesInject } from '../src/client/index.ts'
 import { PANE_ROOT_SLOT_ENTRY } from '../src/client/pane-host.ts'
 
@@ -40,17 +42,18 @@ async function bench() {
   const locale = new LocaleRuntime(runtime.ctx)
   runtime.ctx.provide('locale', locale)
   runtime.slots.installLocale(locale)
-  runtime.ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
-  runtime.ctx.provide('uiWorkspace', {
-    openSession: async () => {},
-    openWorkspace: async (_workspaceId: unknown, beforeOpen: (id: SessionId) => void) => { beforeOpen(FIRST) },
+  runtime.ctx.provide('configForms', {
+    developerTools: { enabled: createSnapshotStore(false), setEnabled: async () => {} },
+    get: () => stubConfigForm().scope,
   } as never)
+  const unused = () => { throw new Error('pane render tests never navigate') }
+  runtime.ctx.provide('uiWorkspace', { openSession: unused, openWorkspace: unused } as never)
   for (const [id, title] of [[FIRST, 'Alpha session'], [SECOND, 'Beta session']] as const) {
     await runtime.sessions.add({
       id,
       summary: { title, displayTitle: title, cwd: '/proj' },
       session: { loadOlder: async () => {}, prompt: async () => ({ ok: true, value: { accepted: true } }) },
-    }, { current: false })
+    })
   }
   // alpha.2: the center column is the keyed 'main' slot (declared by
   // ui-layout in the app; the conversation root `main.conversation` is
@@ -58,6 +61,8 @@ async function bench() {
   await runtime.root.declare({
     'main': { kind: 'keyed', scope: 'root' },
   }, (_props: { renderSlot?: unknown }) => null)
+  runtime.ctx.provide('shortcuts', { catalog: createSnapshotStore([]) } as never)
+  await runtime.mount({ inject: [...menusInject], apply: applyMenus })
   await runtime.mount({ inject: conversationInject, apply: applyConversation })
   await runtime.flush()
   // A stub chat view so the strict session body has an active view.

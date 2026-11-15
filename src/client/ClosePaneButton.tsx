@@ -4,7 +4,7 @@
  * actually has panes to close. Operates the SHARED pane tree through the
  * plugin's injected operations.
  *
- * The glyph is ui-primitives' IconCloseOutline16 — the core's own choice for a
+ * The glyph is ui-primitives' IconCloseOutlineRegular — the core's own choice for a
  * close control inside conversation chrome (ui-conversation's QueueDock,
  * ui-goal's GoalBar both use it at 16px). The 14px IconCloseFill14 belongs to
  * compact chips/rows (attachment cards, dockkit tab chips), where the smaller
@@ -15,7 +15,7 @@
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls the ui-conversation SlotMap merge (header actions slot).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './PaneWorkspace.module.css'
 import type { PaneWorkspaceInjected } from './PaneWorkspace.tsx'
 
@@ -40,7 +40,7 @@ export function ClosePaneButton({ closeFocused, hasSplit, t }: ClosePaneButtonPr
       title={t('pane.close')}
       onClick={() => { closeFocused() }}
     >
-      <IconCloseOutline16 />
+      <IconCloseOutlineRegular size={16} />
     </button>
   )
 }
