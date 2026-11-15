@@ -72,7 +72,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: dsh2026/deepseek-harness/pnpm-lock.yaml
 

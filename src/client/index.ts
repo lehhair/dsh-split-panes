@@ -28,8 +28,6 @@ import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: pulls the ui-layout SlotMap merge ('conversation').
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
-import type { StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { observableHook } from './vendor/renderer/bindings.tsx'
 import { PaneConversation, type PaneRenderDeps } from './PaneConversation.tsx'
 import { PaneWorkspace, type PaneWorkspaceInjected } from './PaneWorkspace.tsx'
@@ -37,8 +35,8 @@ import { SplitPaneButton } from './SplitPaneButton.tsx'
 import { SplitVerticalButton } from './SplitVerticalButton.tsx'
 import { ClosePaneButton } from './ClosePaneButton.tsx'
 import { FullscreenPaneButton } from './FullscreenPaneButton.tsx'
-import { createPaneRootSource } from './root-binding.ts'
-import { installStoreSharing } from './pane-store.ts'
+import { registryCoreAbdicated, registryHostFace } from './pane-host.ts'
+import { mainSessionId, openMainSession } from './pane-session.ts'
 import { resolveSessionIdFromRow, SESSION_DRAG_TYPE, sessionRowOf } from './session-row.ts'
 import { createPaneLayoutStore, allLeaves, type PaneLayoutState } from './pane-layout-store.ts'
 import { en, zh, type PaneKey } from './locales.ts'
@@ -61,7 +59,7 @@ const NS = 'panes'
 const TAKEOVER_PRIORITY = -1
 
 /** Services required by the panes plugin. */
-export const inject = ['slots', 'locale', 'sessions', 'uiSession']
+export const inject = ['slots', 'locale', 'sessions', 'uiSession', 'uiWorkspace']
 
 /**
  * Register the panes-plugin surfaces over ONE shared pane-layout store
@@ -79,31 +77,25 @@ export function apply(ctx: ClientContext): void {
   })
   const paneTree = (): PaneLayoutState => paneStore.getSnapshot()
 
-  // The renderer host inputs shared by every pane: the root standard-source
-  // binding (rebuilt from the contributing services) and the live ledger.
-  const rootSource = createPaneRootSource(ctx)
+  // Every pane renders against an overlay of the registry's OWN host face, so
+  // root standard data, store instances and Factory machinery are shared with
+  // the main view instead of being re-implemented here.
   const deps: PaneRenderDeps = {
     ctx,
-    rootSource,
-    ledger: {
-      entries: key => ctx.slots.entries(key as never) as unknown as readonly StoredEntry[],
-      entriesOfSlot: key => ctx.slots.entriesOfSlot(key as never) as unknown as readonly StoredEntry[],
-      spec: key => ctx.slots.spec(key as never) as unknown as
-        { kind: string; scope: string; inject?: unknown } | undefined,
-      subscribe: (key, fn) => ctx.slots.subscribe(key as never, fn),
-      getVersion: key => ctx.slots.getVersion(key as never),
-    },
+    baseHost: () => registryHostFace(ctx.slots),
     // This plugin's own conversation occupant must never win inside a pane —
     // dropping it is what makes the stock ConversationRoot the pane's root.
     excluded: entry => entry.component === (PaneWorkspace as unknown),
-    wrapEntry: (entry, paneId) => wrapPaneEntry(entry, paneId, {
-      ctx,
-      onSessionStarted: (paneId_, sessionId) => {
-        paneActions.setPaneSession(paneId_, sessionId)
-        paneActions.focusPane(paneId_)
-      },
-    }),
+    coreAbdicated: registryCoreAbdicated(ctx.slots),
+    // A hero inside a pane opened a Session (new or a reused blank): it lands
+    // in THAT pane, which takes focus (docs/ARCHITECTURE.md 焦点模型).
+    onPaneSessionOpened: (paneId, sessionId) => {
+      if (paneTree().root.type === 'leaf') return
+      paneActions.setPaneSession(paneId, sessionId)
+      paneActions.focusPane(paneId)
+    },
   }
+  const currentSession = () => mainSessionId(ctx.sessions.list.getSnapshot())
 
   /** The header affordances operate on the shared tree's FOCUSED pane. */
   const splitFocused: PaneWorkspaceInjected['splitFocused'] = (direction) => {
@@ -113,7 +105,7 @@ export function apply(ctx: ClientContext): void {
     // Anchor the current selection: splitting never creates a host session —
     // the new pane is a new-conversation placeholder (the stock hero).
     paneActions.splitPane(paneId, direction, state.root.type === 'leaf'
-      ? (ctx.sessions.list.getSnapshot().current ?? null)
+      ? (currentSession() ?? null)
       : null)
   }
   const closeFocused: PaneWorkspaceInjected['closeFocused'] = () => {
@@ -134,7 +126,7 @@ export function apply(ctx: ClientContext): void {
   }
 
   const operations: PaneWorkspaceInjected = {
-    openSession: (sessionId) => { ctx.sessions.open(sessionId) },
+    openSession: (sessionId) => { openMainSession(ctx, sessionId) },
     splitWithNew: (paneId, direction, anchor) => { paneActions.splitPane(paneId, direction, anchor) },
     splitFocused,
     closeFocused,
@@ -149,9 +141,6 @@ export function apply(ctx: ClientContext): void {
   }
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-panes: dictionaries')
-  // Store handles shared with core-rendered regions (e.g. the right sidebar's
-  // panel + its header-corner button) must resolve to ONE instance.
-  installStoreSharing(ctx)
 
   // The main-panel occupant. alpha.2 renders the center column through the
   // 'main' keyed slot; the reserved key 'conversation' hosts the official
@@ -260,59 +249,4 @@ export function apply(ctx: ClientContext): void {
       }),
     } as never, ClosePaneButton as never)
   })
-}
-
-/** Wrapped conversation entries: inject provenance per (entry, pane). */
-const wrappedEntries = new WeakMap<StoredEntry, Map<string, StoredEntry>>()
-
-/**
- * Wrap one pane's copy of an entry so the stock `selectWorkspace` inject
- * reports the session it just created back to the pane that owns it.
- *
- * A pane's hero picker creates a session through the stock inject (workspace
- * connect + draft migration, all core logic) and selects it globally. Without
- * this provenance the pane that owns the hero would not adopt the new session
- * — the selection-change effect would bind whichever pane is focused.
- *
- * The wrapper is cached per (entry, pane): the renderer caches inject faces
- * and hooks by entry identity, so a fresh object per render would churn every
- * subscription in the pane.
- * @param entry - ledger entry.
- * @param paneId - owning pane.
- * @param hooks - client context + adoption callback.
- * @returns the wrapped entry (the original when it has no inject face).
- */
-function wrapPaneEntry(
-  entry: StoredEntry,
-  paneId: string,
-  hooks: { ctx: ClientContext; onSessionStarted: (paneId: string, sessionId: SessionId) => void },
-): StoredEntry {
-  const inject = entry.inject
-  if (inject === undefined) return entry
-  let perPane = wrappedEntries.get(entry)
-  if (perPane === undefined) {
-    perPane = new Map()
-    wrappedEntries.set(entry, perPane)
-  }
-  let wrapped = perPane.get(paneId)
-  if (wrapped !== undefined) return wrapped
-  wrapped = {
-    ...entry,
-    inject: (...args: never[]) => {
-      const face = (inject as (...params: never[]) => Record<string, unknown>)(...args)
-      const selectWorkspace = face['selectWorkspace']
-      if (typeof selectWorkspace !== 'function') return face
-      return {
-        ...face,
-        selectWorkspace: async (workspaceId: unknown) => {
-          const result = await (selectWorkspace as (id: unknown) => Promise<void>)(workspaceId)
-          const created = hooks.ctx.sessions.list.getSnapshot().current
-          if (created !== undefined) hooks.onSessionStarted(paneId, created)
-          return result
-        },
-      }
-    },
-  }
-  perPane.set(paneId, wrapped)
-  return wrapped
 }

@@ -24,7 +24,9 @@ import type { DragEvent as ReactDragEvent, ReactNode } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { mainSessionId } from './pane-session.ts'
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
+import { IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PaneLayoutState, PaneLeaf } from './pane-layout-store.ts'
 import { allLeaves, createPaneLayoutStore } from './pane-layout-store.ts'
 import { SplitContainer } from './SplitContainer.tsx'
@@ -152,7 +154,7 @@ function HeroHeader(props: {
             title={t('pane.close')}
             onClick={() => { actions.closePane(paneId) }}
           >
-            <IconCloseOutline16 />
+            <IconCloseOutlineRegular size={16} />
           </button>
         )}
       </div>
@@ -333,7 +335,7 @@ export function PaneWorkspace({
   openSession, splitWithNew, renderPane, resolveRowSession, t,
 }: PaneWorkspaceProps) {
   const state = usePaneStore((s: PaneLayoutState) => s)
-  const current = useSessions((s: { current?: SessionId | undefined }) => s.current)
+  const current = useSessions((s: SessionListState) => mainSessionId(s))
   // Blank sessions render the stock hero (header hidden), so both the single
   // surface and each split pane need the plugin's own new-conversation header
   // there. The selector returns a joined id list — value-stable, so it only

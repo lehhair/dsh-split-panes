@@ -14,8 +14,8 @@
  *   - ui-dockkit       `SplitGlyph`      → split (frame + centre divider)
  *   - ui-sidebar-right `FullscreenGlyph` → enter fullscreen
  *   - ui-sidebar-right `ExitFullscreenGlyph` → leave fullscreen
- * The close control reuses ui-primitives' `IconCloseFill14` (dockkit's own tab
- * close) by import, so it needs no extraction.
+ * The close control reuses ui-primitives' close icon by import, so it needs no
+ * extraction.
  *
  * Usage: node scripts/sync-icons.mjs [--check]
  */
@@ -31,66 +31,52 @@ const OUT = join(PLUGIN_ROOT, 'src/client/icons.tsx')
 const DOCKKIT_TABPANEL = join(CORE, 'packages/client/ui-dockkit/src/components/TabPanel.tsx')
 const SIDEBAR_RIGHT = join(CORE, 'packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx')
 
-/** One extracted glyph: its paths plus the svg attributes the core renders with. */
+/**
+ * One extracted glyph, verbatim: the core's `<svg>` attributes and its child
+ * elements exactly as the core writes them (only the indentation is ours).
+ */
 function extractGlyph(source, functionName) {
   const start = source.indexOf(`function ${functionName}(`)
   if (start === -1) throw new Error(`sync-icons: ${functionName} not found — the core refactored; update this extractor`)
   const end = source.indexOf('\n}', start)
   if (end === -1) throw new Error(`sync-icons: ${functionName} body unterminated`)
-  const body = source.slice(start, end)
-  const svg = /<svg([^>]*)>/.exec(body)
-  if (svg === null) throw new Error(`sync-icons: ${functionName} has no <svg>`)
-  const group = /<g([^>]*)>/.exec(body)
-  const paths = [...body.matchAll(/<path\s+d="([^"]+)"/g)].map(m => m[1])
-  if (paths.length === 0) throw new Error(`sync-icons: ${functionName} has no <path>`)
-  const attr = name => new RegExp(`${name}="([^"]+)"`).exec(svg[1])?.[1]
-  const groupAttr = name => (group === null ? undefined : new RegExp(`${name}="([^"]+)"`).exec(group[1])?.[1])
-  return {
-    width: attr('width') ?? '16',
-    height: attr('height') ?? '16',
-    viewBox: attr('viewBox') ?? '0 0 16 16',
-    group,
-    groupAttrs: group === null ? undefined : group[1].trim(),
-    groupStrokeWidth: groupAttr('strokeWidth'),
-    groupFill: groupAttr('fill'),
-    groupStroke: groupAttr('stroke'),
-    groupLinecap: groupAttr('strokeLinecap'),
-    paths,
+  const m = /<svg([^>]*)>([\s\S]*?)<\/svg>/.exec(source.slice(start, end))
+  if (m === null) throw new Error(`sync-icons: ${functionName} has no <svg>`)
+  const children = m[2].split('\n').map(l => l.trim()).filter(Boolean)
+  if (children.length === 0 || !children.every(l => /^<path\b[^>]*\/>$/.test(l))) {
+    throw new Error(`sync-icons: ${functionName} is not a flat list of <path/> — update this extractor`)
   }
+  return { svgAttrs: m[1].trim(), children }
 }
 
-/** Render one glyph's `<svg>` body the way the core does (group attrs preserved). */
-function renderGlyph(glyph, indent = '    ') {
-  const paths = glyph.paths.map(d => `${indent}  <path d="${d}" />`).join('\n')
-  if (glyph.group === null) return `${indent}<path d="${glyph.paths[0]}" />`
-  return [
-    `${indent}<g ${glyph.groupAttrs}>`,
-    paths,
-    `${indent}</g>`,
-  ].join('\n')
+/** Emit one icon component: the core's `<svg>` with our className, children verbatim. */
+function component(name, doc, glyph) {
+  return `/** ${doc} */
+export function ${name}({ className }: IconProps) {
+  return (
+    <svg className={className} ${glyph.svgAttrs}>
+${glyph.children.map(l => `      ${l}`).join('\n')}
+    </svg>
+  )
+}
+`
 }
 
 function build() {
   const tabpanel = readFileSync(DOCKKIT_TABPANEL, 'utf8')
   const sidebar = readFileSync(SIDEBAR_RIGHT, 'utf8')
 
-  const frame = /const PANEL_FRAME = '([^']+)'/.exec(tabpanel)
-  if (frame === null) throw new Error('sync-icons: dockkit PANEL_FRAME not found — update this extractor')
-  const PANEL_FRAME = frame[1]
-
-  const splitBar = /\$\{PANEL_FRAME\}([^`]+)`/.exec(tabpanel)
-  if (splitBar === null) throw new Error('sync-icons: dockkit SplitGlyph divider not found — update this extractor')
-  const verticalBar = splitBar[1]
+  const split = extractGlyph(tabpanel, 'SplitGlyph')
+  // The divider is the glyph's last path, a single vertical stroke "Mx y1Vy2".
+  const divider = split.children.at(-1)
+  const bar = /d="M(\d+(?:\.\d+)?) (\d+(?:\.\d+)?)V(\d+(?:\.\d+)?)"/.exec(divider)
+  if (split.children.length !== 2 || bar === null) throw new Error(`sync-icons: unexpected dockkit SplitGlyph geometry: ${divider}`)
   // The stacked split has no official counterpart: rotate the divider a
   // quarter turn about the 16×16 centre ((x,y) → (16−y, x)) so it keeps the
   // frame byte-identical and only the bar orientation differs.
-  const nums = [...verticalBar.matchAll(/(\d+(?:\.\d+)?)/g)].map(m => Number(m[1]))
-  // The path repeats the first point to close the rectangle; the first four
-  // numbers are the divider's x1,y1,x2,y2.
-  if (nums.length < 4) throw new Error(`sync-icons: unexpected dockkit divider geometry: ${verticalBar}`)
-  const [bx1, by1, bx2, by2] = nums
+  const [bx, by1, by2] = bar.slice(1).map(Number)
   const rot = n => Number((16 - n).toFixed(5))
-  const horizontalBar = `M${rot(by2)} ${bx1}H${rot(by1)}V${bx2}H${rot(by2)}V${bx1}Z`
+  const stacked = { ...split, children: [split.children[0], divider.replace(bar[0], `d="M${rot(by1)} ${bx}H${rot(by2)}"`)] }
 
   const fullscreen = extractGlyph(sidebar, 'FullscreenGlyph')
   const exitFullscreen = extractGlyph(sidebar, 'ExitFullscreenGlyph')
@@ -101,68 +87,19 @@ function build() {
  *
  * They are the core's own glyphs, at the core's own sizes, so the pane header
  * controls read as siblings of the right-side-bar chrome:
- *   - split      : ui-dockkit's SplitGlyph (the panel frame + centre divider)
- *   - fullscreen : ui-sidebar-right's FullscreenGlyph (figma corners)
- *   - exit       : ui-sidebar-right's ExitFullscreenGlyph (corners inward)
- * The close control imports ui-primitives' IconCloseOutline16 — the core's own
+ *   - split      : ui-dockkit's SplitGlyph (frame + centre divider)
+ *   - fullscreen : ui-sidebar-right's FullscreenGlyph
+ *   - exit       : ui-sidebar-right's ExitFullscreenGlyph
+ * The close control imports ui-primitives' IconCloseOutlineRegular (size 16) — the core's own
  * close for conversation chrome (ui-conversation's QueueDock, ui-goal's
- * GoalBar). The 14px IconCloseFill14 belongs to compact chips/rows instead.
+ * GoalBar).
  */
 import type { IconProps } from '@deepseek-ai/dsh-client-ui-primitives'
 
-/**
- * The ic_ds_panel_left_outline_16 frame alone (outer and inner rounded
- * rectangles as one even-odd ring, without the divider), so the split glyphs
- * draw inside the same silhouette as the panel controls beside them.
- */
-const PANEL_FRAME = '${PANEL_FRAME}'
-
-/** Split side-by-side: dockkit's SplitGlyph (frame + vertical divider). */
-export function IconSplitHorizontal16({ className }: IconProps) {
-  return (
-    <svg className={className} width="${fullscreen.width}" height="${fullscreen.height}" viewBox="${fullscreen.viewBox}" fill="none" aria-hidden="true">
-      <path fillRule="evenodd" clipRule="evenodd" d={\`\${PANEL_FRAME}${verticalBar}\`} fill="currentColor" />
-    </svg>
-  )
-}
-
-/** Split stacked: the same frame with the divider rotated to the middle row. */
-export function IconSplitVertical16({ className }: IconProps) {
-  return (
-    <svg className={className} width="${fullscreen.width}" height="${fullscreen.height}" viewBox="${fullscreen.viewBox}" fill="none" aria-hidden="true">
-      <path fillRule="evenodd" clipRule="evenodd" d={\`\${PANEL_FRAME}${horizontalBar}\`} fill="currentColor" />
-    </svg>
-  )
-}
-
-/** Expand-to-viewport: ui-sidebar-right's FullscreenGlyph. */
-export function IconFullscreen16({ className }: IconProps) {
-  const paths = [
-${fullscreen.paths.map(d => `    '${d}',`).join('\n')}
-  ]
-  return (
-    <svg className={className} width="${fullscreen.width}" height="${fullscreen.height}" viewBox="${fullscreen.viewBox}" fill="none" aria-hidden="true">
-      <g ${fullscreen.groupAttrs}>
-        {paths.map(d => <path key={d} d={d} />)}
-      </g>
-    </svg>
-  )
-}
-
-/** Restore-from-fullscreen: ui-sidebar-right's ExitFullscreenGlyph. */
-export function IconFullscreenExit16({ className }: IconProps) {
-  const paths = [
-${exitFullscreen.paths.map(d => `    '${d}',`).join('\n')}
-  ]
-  return (
-    <svg className={className} width="${exitFullscreen.width}" height="${exitFullscreen.height}" viewBox="${exitFullscreen.viewBox}" fill="none" aria-hidden="true">
-      <g ${exitFullscreen.groupAttrs}>
-        {paths.map(d => <path key={d} d={d} />)}
-      </g>
-    </svg>
-  )
-}
-`
+${component('IconSplitHorizontal16', "Split side-by-side: dockkit's SplitGlyph (frame + vertical divider).", split)}
+${component('IconSplitVertical16', 'Split stacked: the same frame with the divider rotated to the middle row.', stacked)}
+${component('IconFullscreen16', "Expand-to-viewport: ui-sidebar-right's FullscreenGlyph.", fullscreen)}
+${component('IconFullscreenExit16', "Restore-from-fullscreen: ui-sidebar-right's ExitFullscreenGlyph.", exitFullscreen)}`
 }
 
 function main() {

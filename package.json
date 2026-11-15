@@ -70,6 +70,7 @@
     "@deepseek-ai/dsh-client-ui-renderer": "link:../dsh2026/deepseek-harness/packages/client/ui-renderer",
     "@deepseek-ai/dsh-client-ui-slots": "link:../dsh2026/deepseek-harness/packages/client/ui-slots",
     "@deepseek-ai/dsh-client-ui-session": "link:../dsh2026/deepseek-harness/packages/client/ui-session",
+    "@deepseek-ai/dsh-client-ui-context-menu": "link:../dsh2026/deepseek-harness/packages/client/ui-context-menu",
     "@deepseek-ai/dsh-client-ui-conversation": "link:../dsh2026/deepseek-harness/packages/client/ui-conversation",
     "@deepseek-ai/dsh-session": "link:../dsh2026/deepseek-harness/packages/core/session",
     "@deepseek-ai/cordis": "link:../dsh2026/deepseek-harness/vendor/cordis",

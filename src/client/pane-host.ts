@@ -1,75 +1,49 @@
 /**
- * Pane render host: the synthetic {@link SlotRendererHost} one pane runs the
- * vendored core renderer against.
+ * Pane render host: the {@link SlotRendererHost} one pane runs the vendored
+ * core renderer against.
  *
- * The core renderer reads every dependency off this single object, so a pane
- * is fully described by what the host returns:
+ * Since dsh 0.2.2-rc.3 the host contract carries Factory machinery
+ * (`factoryOf`, `factoryStoreOf`, occurrence retention, …) and store
+ * resolution bound to the registry's own instance axis. Re-implementing that
+ * would fork core state, so a pane host is an OVERLAY on the registry's own
+ * host face: every member is delegated except the five pane decisions —
  *
- *   host.root            → the assembled root standard-source binding
- *   host.scope('session')→ THIS pane's binding, not the global current one
- *   host.entriesOf*      → the live ledger, with this plugin's conversation
- *                          shadow removed so the stock root wins
- *   host.entriesOfSlot('root') → the synthetic PaneRoot entry
- *   host.storeOf         → per-(handle, scope) store instances
- *   host.locale          → the installed locale face (the `t` seat cache)
- *
- * Everything the core normally owns internally — outlet dispatch, kit
- * synthesis, inject caches, error boundaries — then runs verbatim on the
- * pane's session. This file only supplies the five decisions above plus the
- * crash supervision the private `SlotCore.reportEntryError` would have done.
+ *   entriesOf/entriesOfSlot('root') → the synthetic PaneRoot entry
+ *   entriesOf*(other)               → the live ledger minus this plugin's own
+ *                                     conversation shadow (so the stock root wins)
+ *   reportEntryError                → pane-local abdication (a pane crash must
+ *                                     not retire the entry for the main view)
+ *   subscribe/getVersion            → ledger + pane-local abdication bumps
+ *   scope('session'|'session-maybe')→ THIS pane's binding source
  */
-import type { StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
+import type { StoredEntry, StoredFactory } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
-  HostObservable, LocaleFace, ScopedStandardSourceBinding, SessionAreaProps, SlotRendererHost,
-  SlotScopeAdapter, StandardSourceBinding, StoreInstanceLike,
+  HostObservable, SlotRendererHost, SlotScopeAdapter, StandardSourceBinding,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import { PaneRoot } from './PaneRoot.tsx'
-import { storeInstanceOf } from './pane-store.ts'
-
-/** The ledger face a pane host reads (the live SlotRegistry, type-erased). */
-export interface PaneLedger {
-  /** Raw registrations for one key, in registration order. */
-  entries(key: string): readonly StoredEntry[]
-  /** Shadowing winners for one key (the registry's own projection). */
-  entriesOfSlot(key: string): readonly StoredEntry[]
-  /** Declared spec (kind/scope/slot-level inject) for one key. */
-  spec(key: string): { kind: string; scope: string; inject?: unknown } | undefined
-  /** Registration-version subscription for one key (uSES pair with getVersion). */
-  subscribe(key: string, fn: () => void): () => void
-  /** Monotonic registration version for one key. */
-  getVersion(key: string): number
-}
 
 /** Options one pane host is built from. */
 export interface PaneHostOptions {
-  /** Live slot ledger. */
-  readonly ledger: PaneLedger
-  /** The installed session scope adapter (resolve/renderArea are reused verbatim). */
+  /** The registry's own host face (delegation target). */
+  readonly base: SlotRendererHost
+  /** The installed session scope adapter. */
   readonly adapter: SlotScopeAdapter
-  /** Installed locale face, when present. */
-  readonly locale?: LocaleFace | undefined
-  /** Root standard-source binding observable. */
-  readonly root: HostObservable<StandardSourceBinding>
-  /** This pane's session binding; undefined renders the new-conversation state. */
-  readonly binding: ScopedStandardSourceBinding | undefined
-  /**
-   * The absent binding used when `binding` is undefined. Build it with
-   * {@link paneAbsentBinding} so the pane sees the full declared source
-   * roster (absent hooks must still be FUNCTIONS).
-   */
-  readonly absent?: StandardSourceBinding | undefined
+  /** This pane's binding source (a retained Session, or the absent projection). */
+  readonly binding: HostObservable<StandardSourceBinding>
   /**
    * Entries this pane must never elect (the plugin's own conversation shadow —
    * dropping it is what makes the stock ConversationRoot the winner).
    */
   readonly excluded?: ((entry: StoredEntry) => boolean) | undefined
-  /**
-   * Entry wrapper applied to every elected entry, identity-stable per entry
-   * (inject provenance rides here). Defaults to the identity function.
-   */
-  readonly wrap?: ((entry: StoredEntry) => StoredEntry) | undefined
   /** Diagnostic hook for pane-side occupant crashes. */
   readonly onCrash?: ((key: string, entry: StoredEntry, error: unknown) => void) | undefined
+  /** Entries the CORE abdicated (see {@link registryCoreAbdicated}). */
+  readonly coreAbdicated?: ((entry: StoredEntry) => boolean) | undefined
+  /**
+   * Pane-local view of a Factory's inject face (e.g. to learn which Session a
+   * hero's `selectWorkspace` opened). Omitted: Factories render unchanged.
+   */
+  readonly wrapFactoryInject?: ((name: string, face: Record<string, unknown>) => Record<string, unknown>) | undefined
 }
 
 /** The synthetic 'root' occupant: a one-line dispatch into 'main.conversation'. */
@@ -83,74 +57,63 @@ const PANE_ROOT_ENTRY: StoredEntry = {
 const ROOT_SPEC = { kind: 'single', scope: 'root' } as const
 
 /**
- * The absent scope binding for a new-conversation pane, derived from the
- * installed adapter so it carries EXACTLY the declared source roster (a
- * hand-written shape would miss any hook a later package provides, and a
- * missing seat makes a session-maybe occupant read `undefined` as a hook
- * function — the "useConversation is not a function" failure).
- *
- * With no selection at all the adapter's current binding IS the core's own
- * absent binding, so it is returned as-is.
- * @param ctx - client context carrying uiSession.
- * @returns the absent binding shape.
+ * Read the registry's host face. `hostFace()` is TypeScript-private on
+ * SlotRegistry but is the very object the core renderer receives; the pane
+ * renderer must see the same Factory and store axes.
+ * @param slots - the `ctx.slots` SlotRegistry.
+ * @returns the registry host face.
+ * @throws when this core build exposes no host face.
  */
-export function paneAbsentBinding(ctx: {
-  uiSession: { adapter: { current: HostObservable<StandardSourceBinding> } }
-}): StandardSourceBinding {
-  const current = ctx.uiSession.adapter.current.getSnapshot()
-  if (current.key === undefined) return current
-  const hooks: Record<string, undefined> = {}
-  for (const name of Object.keys(current.hooks)) hooks[name] = undefined
-  const keyedHooks: Record<string, undefined> = {}
-  for (const name of Object.keys(current.keyedHooks)) keyedHooks[name] = undefined
-  const props: Record<string, undefined> = {}
-  for (const name of Object.keys(current.props)) props[name] = undefined
-  return { key: undefined, hooks, keyedHooks, props }
+export function registryHostFace(slots: unknown): SlotRendererHost {
+  const face = (slots as { hostFace?: () => SlotRendererHost }).hostFace
+  if (typeof face !== 'function') {
+    throw new Error('[dsh-split-panes] this dsh core exposes no slot host face (unsupported core version)')
+  }
+  return face.call(slots)
 }
 
-/** The cell one entry occupies under its slot's kind (mirrors SlotCore). */
-function cellOf(kind: string, entry: StoredEntry): string {
-  if (kind === 'keyed') return entry.options.key ?? ''
-  if (kind === 'list') return entry.options.id ?? ''
-  return ''
+/**
+ * The core's own abdication set, read live from the registry's SlotCore
+ * (`_core.abdicated`, TS-private like `hostFace()`; same documented exception).
+ * Reading the set itself — rather than mirroring `onEntryError` — keeps it
+ * complete across plugin reloads and for abdications that predate this plugin.
+ * @param slots - the `ctx.slots` SlotRegistry.
+ * @returns membership test for core-abdicated entries.
+ * @throws when this core build has no such set.
+ */
+export function registryCoreAbdicated(slots: unknown): (entry: StoredEntry) => boolean {
+  const set = (slots as { _core?: { abdicated?: unknown } })._core?.abdicated
+  if (!(set instanceof WeakSet)) {
+    throw new Error('[dsh-split-panes] this dsh core exposes no slot abdication set (unsupported core version)')
+  }
+  return entry => set.has(entry)
 }
 
-/** Resolve one entry store's instance for one scope key (shared with the core). */
-function storeOf(entry: StoredEntry, binding: ScopedStandardSourceBinding | undefined): StoreInstanceLike | undefined {
-  const handle = entry.store as unknown as { create?: (scopeKey?: string) => StoreInstanceLike } | undefined
-  if (handle === undefined || typeof handle.create !== 'function') return undefined
-  return storeInstanceOf(handle, binding?.key)
+/** The cell one entry occupies under its slot's kind (mirrors SlotCore.entriesOfSlot). */
+function cellOf(kind: string, entry: StoredEntry): string | undefined {
+  if (kind === 'keyed') return entry.options.key
+  if (kind === 'list') return entry.options.id
+  if (kind === 'hoc') return JSON.stringify([entry.options.key, entry.options.id])
+  return undefined
 }
 
 /**
  * Build the render host for one pane.
- *
- * The host is created per pane session (the memoized `PaneConversation`
- * owns its lifetime); its ledger reads stay live, so late registrations
- * (view tabs, node renderers, docks) appear in every pane as they land.
- * @param options - ledger, adapter, root binding, pane binding, wrappers.
+ * @param options - base host, adapter, pane binding, exclusion.
  * @returns the renderer host for this pane.
  */
 export function createPaneHost(options: PaneHostOptions): SlotRendererHost {
-  const { ledger, adapter, locale, root, binding } = options
+  const { base, adapter, binding } = options
   const excluded = options.excluded ?? (() => false)
-  const wrap = options.wrap ?? ((entry: StoredEntry) => entry)
-  const paneBinding: StandardSourceBinding = binding ?? options.absent ?? { key: undefined, hooks: {}, keyedHooks: {}, props: {} }
 
-  /** Entries retired by an abdicating crash (mirrors SlotCore's WeakSet). */
+  /** Entries retired by a pane-local abdicating crash. */
   const abdicated = new WeakSet<StoredEntry>()
-  /** Local version bumps so outlets re-read the ledger after an abdication. */
   const localVersions = new Map<string, number>()
-  const listeners = new Map<string, Set<() => void>>()
-  const ledgerDisposers = new Map<string, () => void>()
-  /** Wrapped-entry cache: the renderer caches inject faces per entry identity. */
-  const wrapped = new WeakMap<StoredEntry, StoredEntry>()
+  const localListeners = new Map<string, Set<() => void>>()
 
   const bump = (key: string): void => {
     localVersions.set(key, (localVersions.get(key) ?? 0) + 1)
-    const set = listeners.get(key)
-    if (set === undefined) return
-    for (const listener of [...set]) {
+    for (const listener of [...(localListeners.get(key) ?? [])]) {
       try {
         listener()
       } catch (error) {
@@ -159,105 +122,123 @@ export function createPaneHost(options: PaneHostOptions): SlotRendererHost {
     }
   }
 
-  const wrappedEntry = (entry: StoredEntry): StoredEntry => {
-    let value = wrapped.get(entry)
-    if (value === undefined) {
-      value = wrap(entry)
-      wrapped.set(entry, value)
-    }
-    return value
-  }
+  const coreAbdicated = options.coreAbdicated ?? (() => false)
 
-  /** Elect one winner per cell, mirroring SlotCore's shadowing projection. */
+  /**
+   * SlotCore.entriesOfSlot over the priority-sorted ledger, skipping entries
+   * the core abdicated (mirrored set) and entries this pane hides.
+   */
   const winnersOf = (key: string): readonly StoredEntry[] => {
-    const all = ledger.entries(key)
-    const spec = ledger.spec(key) ?? (key === 'root' ? ROOT_SPEC : undefined)
-    const kind = spec?.kind ?? 'single'
-    if (kind === 'chain') {
-      return all.filter(entry => !abdicated.has(entry) && !excluded(entry))
-    }
-    const order = new Map<StoredEntry, number>()
-    all.forEach((entry, index) => { order.set(entry, index) })
-    const best = new Map<string, StoredEntry>()
+    const all = base.entriesOf(key)
+    const hidden = (entry: StoredEntry): boolean => abdicated.has(entry) || excluded(entry)
+    // Fast path: nothing pane-specific applies, so the core's own election stands.
+    if (!all.some(hidden)) return base.entriesOfSlot(key)
+    const kind = base.specOf(key)?.kind ?? 'single'
+    if (kind === 'chain') return all.filter(entry => !hidden(entry))
+    const seen = new Set<string | undefined>()
+    const heads: StoredEntry[] = []
     for (const entry of all) {
-      if (abdicated.has(entry) || excluded(entry)) continue
+      if (coreAbdicated(entry) || hidden(entry)) continue
       const cell = cellOf(kind, entry)
-      const incumbent = best.get(cell)
-      if (incumbent === undefined) {
-        best.set(cell, entry)
-        continue
-      }
-      const challenger = entry.options.priority ?? 0
-      const holding = incumbent.options.priority ?? 0
-      if (challenger < holding
-        || (challenger === holding && (order.get(entry) ?? 0) < (order.get(incumbent) ?? 0))) {
-        best.set(cell, entry)
-      }
+      if (seen.has(cell)) continue
+      seen.add(cell)
+      heads.push(entry)
     }
-    return [...best.values()]
+    return heads
   }
 
+  // Methods are re-bound to the core adapter so `this` stays the adapter.
   const paneScope: SlotScopeAdapter = {
-    current: {
-      getSnapshot: () => paneBinding,
-      subscribe: () => () => {},
-    },
-    resolve: key => adapter.resolve(key),
-    // The session owner's own area semantics; a composition without one is
-    // already an assembly failure in the core renderer.
-    ...(adapter.renderArea === undefined
-      ? {}
-      : { renderArea: (value: StandardSourceBinding, props: SessionAreaProps) => adapter.renderArea!(value, props) }),
+    current: binding,
+    bindingSource: adapter.bindingSource.bind(adapter),
+    ...(adapter.renderArea === undefined ? {} : { renderArea: adapter.renderArea.bind(adapter) }),
   }
 
-  return {
-    subscribe(key, fn) {
-      let set = listeners.get(key)
+  // Delegate everything through the prototype (the base's live `locale`
+  // getter included), then override the pane decisions.
+  return Object.assign(Object.create(base) as SlotRendererHost, {
+    subscribe(key: string, fn: () => void): () => void {
+      let set = localListeners.get(key)
       if (set === undefined) {
         set = new Set()
-        listeners.set(key, set)
-        ledgerDisposers.set(key, ledger.subscribe(key, () => { bump(key) }))
+        localListeners.set(key, set)
       }
       set.add(fn)
+      const disposeBase = base.subscribe(key, fn)
       return () => {
         set?.delete(fn)
-        if (set !== undefined && set.size === 0) {
-          listeners.delete(key)
-          ledgerDisposers.get(key)?.()
-          ledgerDisposers.delete(key)
-        }
+        disposeBase()
       }
     },
-    getVersion: key => ledger.getVersion(key) + (localVersions.get(key) ?? 0),
-    entriesOf: (key) => {
+    getVersion: (key: string): number => base.getVersion(key) + (localVersions.get(key) ?? 0),
+    entriesOf: (key: string): readonly StoredEntry[] => {
       if (key === 'root') return [PANE_ROOT_ENTRY]
-      return ledger.entries(key).filter(entry => !excluded(entry)).map(wrappedEntry)
+      const all = base.entriesOf(key)
+      return all.some(excluded) ? all.filter(entry => !excluded(entry)) : all
     },
-    entriesOfSlot: (key) => {
+    entriesOfSlot: (key: string): readonly StoredEntry[] => {
       if (key === 'root') return [PANE_ROOT_ENTRY]
-      return winnersOf(key).map(wrappedEntry)
+      return winnersOf(key)
     },
-    // The renderer guards retained renderSlot closures with this. A pane's
-    // bindings are created from the stock entries, whose registrations live as
-    // long as their owning package; a disposed entry disappears from
-    // entriesOfSlot on the next ledger tick, which is the real re-election.
-    isLive: () => true,
-    reportEntryError(key, entry, error, info) {
+    isLive: (entry: StoredEntry): boolean => entry === PANE_ROOT_ENTRY || base.isLive(entry),
+    reportEntryError(key: string, entry: StoredEntry, error: unknown, info: { abdicate: boolean }): void {
       console.error(`[dsh-split-panes] pane occupant crashed in '${key}':`, error)
       options.onCrash?.(key, entry, error)
       if (!info.abdicate) return
       abdicated.add(entry)
       bump(key)
     },
-    specOf: (key) => {
-      if (key === 'root') return ROOT_SPEC
-      return ledger.spec(key) as never
+    specOf: (key: string) => (key === 'root' ? ROOT_SPEC : base.specOf(key)) as ReturnType<SlotRendererHost['specOf']>,
+    scope: (scope: Parameters<SlotRendererHost['scope']>[0]) =>
+      (scope === 'session' || scope === 'session-maybe' ? paneScope : base.scope(scope)),
+    ...factoryOverrides(base, options.wrapFactoryInject),
+  })
+}
+
+/**
+ * Hand the renderer a per-pane copy of each Factory definition whose inject
+ * face passes through `wrap`. The copy is a distinct object, so every member
+ * that keys on definition identity (liveness, store axes, occurrence
+ * retention, crash reports) is translated back to the core's original.
+ * @param base - registry host face.
+ * @param wrap - pane-local inject transform, or undefined for no overrides.
+ * @returns host members to overlay.
+ */
+function factoryOverrides(
+  base: SlotRendererHost,
+  wrap: PaneHostOptions['wrapFactoryInject'],
+): Partial<SlotRendererHost> {
+  if (wrap === undefined) return {}
+  const copies = new WeakMap<StoredFactory, StoredFactory>()
+  const originals = new WeakMap<object, StoredFactory>()
+  const original = (definition: StoredFactory): StoredFactory => originals.get(definition) ?? definition
+  const copyOf = (definition: StoredFactory): StoredFactory => {
+    const inject = definition.inject
+    if (inject === undefined) return definition
+    let copy = copies.get(definition)
+    if (copy === undefined) {
+      copy = {
+        ...definition,
+        inject: ((...args: never[]) => wrap(definition.name, inject(...args))) as StoredFactory['inject'],
+      }
+      copies.set(definition, copy)
+      originals.set(copy, definition)
+    }
+    return copy
+  }
+  return {
+    factoryOf: (name) => {
+      const definition = base.factoryOf(name)
+      return definition === undefined ? undefined : copyOf(definition)
     },
-    storeOf: (entry, scopeBinding) => storeOf(entry, scopeBinding),
-    root,
-    scopeRevision: { getSnapshot: () => 0, subscribe: () => () => {} },
-    scope: scope => (scope === 'session' || scope === 'session-maybe' ? paneScope : undefined),
-    ...(locale !== undefined ? { locale } : {}),
+    isFactoryLive: definition => base.isFactoryLive(original(definition)),
+    factoryStoreOf: (definition, scopeBinding, occurrence) =>
+      base.factoryStoreOf(original(definition), scopeBinding, occurrence),
+    retainFactoryOccurrence: (definition, occurrence) =>
+      base.retainFactoryOccurrence(original(definition), occurrence),
+    reportFactoryError: (name, registration, error) => {
+      base.reportFactoryError(name, originals.get(registration) ?? registration, error)
+    },
   }
 }
 

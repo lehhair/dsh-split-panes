@@ -6,13 +6,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent } from '@testing-library/react'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import {
-  SlotTestRuntime, stubSettingsScope, usePinnedBrowserLanguages,
+  SlotTestRuntime, stubConfigForm, usePinnedBrowserLanguages,
 } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
   apply as applyConversation, inject as conversationInject,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { apply as applyMenus, inject as menusInject } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import { apply, inject } from '../src/client/index.ts'
 import { SESSION_DRAG_TYPE } from '../src/client/session-row.ts'
 
@@ -23,24 +25,37 @@ async function bench() {
   const locale = new LocaleRuntime(runtime.ctx)
   runtime.ctx.provide('locale', locale)
   runtime.slots.installLocale(locale)
-  runtime.ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
+  runtime.ctx.provide('configForms', {
+    developerTools: { enabled: createSnapshotStore(false), setEnabled: async () => {} },
+    get: () => stubConfigForm().scope,
+  } as never)
+  // rc.3 ui-workspace semantics: the main view retains the opened Session.
+  let mainReference: { release(): void } | undefined
+  const replaceMain = (id: SessionId, beforeOpen?: (id: SessionId) => void): void => {
+    const next = runtime.sessions.retain(id, { source: 'mainView' })
+    beforeOpen?.(id)
+    mainReference?.release()
+    mainReference = next
+  }
   runtime.ctx.provide('uiWorkspace', {
-    openSession: async () => {},
-    openWorkspace: async (_workspaceId: unknown, beforeOpen: (id: SessionId) => void) => { beforeOpen('s1' as SessionId) },
+    openSession: async (id: SessionId) => { replaceMain(id) },
+    openWorkspace: async (_workspaceId: unknown, beforeOpen: (id: SessionId) => void) => { replaceMain('s1' as SessionId, beforeOpen) },
   } as never)
   await runtime.sessions.add({
     id: 's1' as SessionId,
     summary: { title: 'Fix the build', displayTitle: 'Fix the build', cwd: '/dev' },
-  }, { current: false })
+  })
   await runtime.sessions.add({
     id: 's2' as SessionId,
     summary: { title: 'Second', displayTitle: 'Second', cwd: '/dev' },
-  }, { current: false })
+  })
   // alpha.2: the center column is the keyed 'main' slot; the conversation root
   // 'main.conversation' is declared by ui-conversation itself.
   await runtime.root.declare({
     'main': { kind: 'keyed', scope: 'root' },
   }, (_props: { renderSlot?: unknown }) => null)
+  runtime.ctx.provide('shortcuts', { catalog: createSnapshotStore([]) } as never)
+  await runtime.mount({ inject: [...menusInject], apply: applyMenus })
   await runtime.mount({ inject: conversationInject, apply: applyConversation })
   await runtime.flush()
   return runtime
@@ -48,7 +63,7 @@ async function bench() {
 
 describe('ui-panes apply', () => {
   it('declares only the services it uses', () => {
-    expect(inject).toEqual(['slots', 'locale', 'sessions', 'uiSession'])
+    expect(inject).toEqual(['slots', 'locale', 'sessions', 'uiSession', 'uiWorkspace'])
   })
 
   it('occupies the conversation slot permanently and owns one shared pane tree', async () => {
@@ -83,7 +98,8 @@ describe('ui-panes apply', () => {
     const ids = buttons.map(e => (e as { options: { id?: string } }).options.id).sort()
     expect(ids).toEqual(['panes-close', 'panes-fullscreen', 'panes-split', 'panes-split-v'])
 
-    runtime.sessions.open('s1' as SessionId)
+    await (runtime.ctx.get('uiWorkspace') as { openSession(id: SessionId): Promise<void> }).openSession('s1' as SessionId)
+    await runtime.flush()
     ops!.splitFocused('horizontal')
     await runtime.flush()
     expect(ops!.hasSplit()).toBe(true)
@@ -99,7 +115,8 @@ describe('ui-panes apply', () => {
     const runtime = await bench()
     await runtime.mount({ inject: [...inject], apply })
     await runtime.flush()
-    runtime.sessions.open('s1' as SessionId)
+    await (runtime.ctx.get('uiWorkspace') as { openSession(id: SessionId): Promise<void> }).openSession('s1' as SessionId)
+    await runtime.flush()
     fireEvent.keyDown(window, { key: 'ArrowRight', ctrlKey: true, shiftKey: true })
     await runtime.flush()
     const splitButton = runtime.slots.entries('conversation.session.header.actions' as never)

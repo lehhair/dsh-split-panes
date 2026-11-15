@@ -27,7 +27,7 @@ const CORE = resolve(PLUGIN_ROOT, '../dsh2026/deepseek-harness/packages/client/u
 const OUT = join(PLUGIN_ROOT, 'src/client/vendor/renderer')
 
 /** Files copied verbatim from the core renderer. */
-export const VENDORED_FILES = ['bind.ts', 'bindings.tsx', 'scoped-slots.tsx']
+export const VENDORED_FILES = ['bind.ts', 'bindings.tsx', 'errors.ts', 'scoped-slots.tsx']
 
 /** Normalize platform line endings (git autocrlf rewrites Windows copies). */
 const normalize = (text) => text.replace(/\r\n/g, '\n')
